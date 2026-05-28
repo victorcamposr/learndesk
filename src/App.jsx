@@ -930,7 +930,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
   const emAusencia      = ausenciasAtivas.length > 0
   const hasObs          = !!tutor.obs
   const isDesligado     = tutor.cargo === 'Desligado'
-  const diasAlerta      = isDesligado ? null : diasSemPresenca(tutor)
+  const diasAlerta      = isDesligado || !_cfg.atividadeAutomatica ? null : diasSemPresenca(tutor)
   const atividadeColor  = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
   const accentColor     = isDesligado ? (CARGO_COLORS['Desligado']) : diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
 
@@ -1269,7 +1269,7 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
   const emAusencia  = ausenciasAtivas.length > 0
   const hasObs      = !!tutor.obs
   const isDesligado = tutor.cargo === 'Desligado'
-  const diasAlerta  = isDesligado ? null : diasSemPresenca(tutor)
+  const diasAlerta  = isDesligado || !_cfg.atividadeAutomatica ? null : diasSemPresenca(tutor)
   const atividadeColor = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
   const accentColor = isDesligado ? CARGO_COLORS['Desligado'] : diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
 
@@ -2202,7 +2202,7 @@ function IAModal({ open, onClose, tutores, apiKey: apiKeyProp, onSaveApiKey }) {
 }
 
 // ── PagamentoEmailModal ───────────────────────────────────────────────────────
-function PagamentoEmailModal({ open, onClose, tutores }) {
+function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
   const hoje = new Date()
   const mesAtual = hoje.getMonth()
   const anoAtual = hoje.getFullYear()
@@ -2222,7 +2222,10 @@ function PagamentoEmailModal({ open, onClose, tutores }) {
     return false
   }), [tutores])
 
-  const [mundo, setMundo]     = useState(() => SERVERS.find(s => s.id === getServer())?.name || '')
+  const [mundo, setMundo]     = useState(() => {
+    const srv = (servers || SERVERS).find(s => s.id === getServer())
+    return envConfigs?.[getServer()]?.customName || srv?.name || ''
+  })
   const [dataPag, setDataPag] = useState(`${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}`)
   const [membros, setMembros] = useState([])
   const [emailGerado, setEmailGerado] = useState(null)
@@ -2232,6 +2235,8 @@ function PagamentoEmailModal({ open, onClose, tutores }) {
 
   useEffect(() => {
     if (open) {
+      const srv = (servers || SERVERS).find(s => s.id === getServer())
+      setMundo(envConfigs?.[getServer()]?.customName || srv?.name || '')
       setMembros(aptos.map(t => ({ ...t, nitroOficial: false, nitroStaff: false, obsEmail: '' })))
       setEmailGerado(null)
       setCopiado('')
@@ -2828,7 +2833,7 @@ function PresencaHistoricoChart({ tutores }) {
 }
 
 // ── DashboardTab ──────────────────────────────────────────────────────────────
-function DashboardTab({ tutores, apiKey, onSaveApiKey }) {
+function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
   const [sortAsc, setSortAsc] = useState(false)
   const [pagamentoOpen, setPagamentoOpen] = useState(false)
 
@@ -2907,7 +2912,7 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey }) {
   return (
     <div style={{ maxWidth: 1220, margin: '0 auto', padding: '28px 24px' }}>
 
-      <PagamentoEmailModal open={pagamentoOpen} onClose={() => setPagamentoOpen(false)} tutores={tutores} />
+      <PagamentoEmailModal open={pagamentoOpen} onClose={() => setPagamentoOpen(false)} tutores={tutores} servers={servers} envConfigs={envConfigs} />
 
       {/* Ação rápida — Email de Pagamento */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
@@ -3151,15 +3156,25 @@ function DashboardRow({ t }) {
 }
 
 // ── DevicesPanel ──────────────────────────────────────────────────────────────
-function DevicesPanel() {
-  const [devices, setDevices] = useState([])
-  const [loading, setLoading] = useState(false)
+function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
+  const [devices, setDevices]         = useState([])
+  const [adminApelidos, setAdminAp]   = useState([])
+  const [permissions, setPerms]       = useState({})
+  const [loading, setLoading]         = useState(false)
+  const [search, setSearch]           = useState('')
+  const [expandedToken, setExpanded]  = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await apiFetch('/api/auth/devices')
-      if (r.ok) setDevices(await r.json())
+      const [rDev, rAdm, rPerm] = await Promise.all([
+        apiFetch('/api/auth/devices'),
+        apiFetch('/api/admin/apelidos'),
+        apiFetch('/api/auth/devices/permissions'),
+      ])
+      if (rDev.ok)  setDevices(await rDev.json())
+      if (rAdm.ok)  setAdminAp((await rAdm.json()).apelidos || [])
+      if (rPerm.ok) setPerms(await rPerm.json())
     } finally { setLoading(false) }
   }, [])
 
@@ -3170,11 +3185,40 @@ function DevicesPanel() {
     load()
   }
 
+  const toggleAdmin = async (apelido, isAdmin) => {
+    const updated = isAdmin
+      ? adminApelidos.filter(a => a !== apelido)
+      : [...adminApelidos, apelido]
+    await apiFetch('/api/admin/apelidos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apelidos: updated }),
+    })
+    load()
+  }
+
+  const savePerms = async (token, role, allowedServers) => {
+    await apiFetch(`/api/auth/devices/${token}/permissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, allowedServers: allowedServers.length > 0 ? allowedServers : null }),
+    })
+    load()
+  }
+
   const statusColor = { approved: '#10b981', pending: C.gold, denied: '#ef4444' }
   const statusLabel = { approved: 'Aprovado', pending: 'Pendente', denied: 'Negado' }
 
-  const pending = devices.filter(d => d.status === 'pending')
-  const others  = devices.filter(d => d.status !== 'pending')
+  const q = search.trim().toLowerCase()
+  const filtered = devices.filter(d => {
+    if (!q) return true
+    return (d.apelido || '').toLowerCase().includes(q)
+      || (d.browser || '').toLowerCase().includes(q)
+      || (d.os || '').toLowerCase().includes(q)
+  })
+
+  const pending = filtered.filter(d => d.status === 'pending')
+  const others  = filtered.filter(d => d.status !== 'pending')
 
   const InfoChip = ({ label, value, color }) => value ? (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -3185,11 +3229,27 @@ function DevicesPanel() {
 
   const DeviceRow = ({ d }) => {
     const [confirmDelete, setConfirmDelete] = useState(false)
+    const isExpanded = expandedToken === d.token
+    const isAdmin    = d.apelido && adminApelidos.includes(d.apelido)
+    const perm       = permissions[d.token] || {}
+    const [localRole, setLocalRole]             = useState(perm.role || 'full')
+    const [localAllowed, setLocalAllowed]       = useState(perm.allowedServers || [])
+    const [savingPerm, setSavingPerm]           = useState(false)
+
+    useEffect(() => {
+      setLocalRole(perm.role || 'full')
+      setLocalAllowed(perm.allowedServers || [])
+    }, [perm.role, JSON.stringify(perm.allowedServers)])
+
     const geo = d.geo
     const location = geo
       ? [geo.city, geo.region, geo.country].filter(Boolean).join(', ')
       : d.ip
     const isp = geo?.isp
+
+    const toggleWorld = id => setLocalAllowed(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
 
     return (
     <div style={{
@@ -3207,11 +3267,17 @@ function DevicesPanel() {
           <Globe size={14} color={statusColor[d.status]} />
         </div>
         <div style={{ flex: 1 }}>
-          {d.apelido && (
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.gold, marginBottom: 1 }}>
-              {d.apelido}
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 1 }}>
+            {d.apelido && (
+              <span style={{ fontSize: 13, fontWeight: 700, color: C.gold }}>{d.apelido}</span>
+            )}
+            {isAdmin && (
+              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.18)', border: `1px solid ${C.primaryBright}40`, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.06em' }}>Admin</span>
+            )}
+            {perm.role === 'senior' && (
+              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(20,184,166,0.12)', border: `1px solid ${C.teal}40`, color: C.teal, textTransform: 'uppercase', letterSpacing: '.06em' }}>Sênior</span>
+            )}
+          </div>
           <div style={{ fontSize: d.apelido ? 11 : 13, fontWeight: d.apelido ? 400 : 700, color: d.apelido ? C.textMuted : C.text }}>
             {d.browser || '?'} · {d.os || '?'}
           </div>
@@ -3219,55 +3285,137 @@ function DevicesPanel() {
             Solicitado: {new Date(d.requestedAt).toLocaleString('pt-BR')}
           </div>
         </div>
-        <span style={{
-          fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 6,
-          color: statusColor[d.status], background: `${statusColor[d.status]}18`,
-          border: `1px solid ${statusColor[d.status]}40`, flexShrink: 0,
-        }}>{statusLabel[d.status]}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 6,
+            color: statusColor[d.status], background: `${statusColor[d.status]}18`,
+            border: `1px solid ${statusColor[d.status]}40`,
+          }}>{statusLabel[d.status]}</span>
+          <button style={{ ...btn('ghost', 'sm'), fontSize: 10 }} onClick={() => setExpanded(isExpanded ? null : d.token)}>
+            {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />} Detalhes
+          </button>
+        </div>
       </div>
 
-      {/* Localização */}
-      {(location || isp) && (
-        <div style={{
-          background: 'rgba(99,102,241,0.07)', border: `1px solid ${C.border}`,
-          borderRadius: 8, padding: '8px 12px', marginBottom: 10, display: 'flex', gap: 14, flexWrap: 'wrap',
-        }}>
-          {location && <InfoChip label="Localização" value={location} color={C.primaryBright} />}
-          {isp      && <InfoChip label="Provedor (ISP)" value={isp} color={C.textSoft} />}
-          {d.ip     && <InfoChip label="IP" value={d.ip} />}
-        </div>
+      {/* Expandable details */}
+      {isExpanded && (
+        <>
+          {/* Localização */}
+          {(location || isp) && (
+            <div style={{
+              background: 'rgba(99,102,241,0.07)', border: `1px solid ${C.border}`,
+              borderRadius: 8, padding: '8px 12px', marginBottom: 10, display: 'flex', gap: 14, flexWrap: 'wrap',
+            }}>
+              {location && <InfoChip label="Localização" value={location} color={C.primaryBright} />}
+              {isp      && <InfoChip label="Provedor (ISP)" value={isp} color={C.textSoft} />}
+              {d.ip     && <InfoChip label="IP" value={d.ip} />}
+            </div>
+          )}
+
+          {/* Hardware / Software */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
+            gap: '8px 16px', background: 'rgba(255,255,255,0.02)',
+            border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px', marginBottom: 10,
+          }}>
+            <InfoChip label="Tela"         value={d.screen} />
+            <InfoChip label="Pixel Ratio"  value={d.pixelRatio ? `${d.pixelRatio}x` : null} />
+            <InfoChip label="Cor"          value={d.colorDepth ? `${d.colorDepth}-bit` : null} />
+            <InfoChip label="CPU (cores)"  value={d.cpuCores ? `${d.cpuCores} cores` : null} />
+            <InfoChip label="RAM"          value={d.ramGB ? `~${d.ramGB} GB` : null} />
+            <InfoChip label="Timezone"     value={d.timezone} />
+            <InfoChip label="Idioma"       value={d.language} />
+            <InfoChip label="Rede"         value={d.network} />
+            <InfoChip label="Plataforma"   value={d.platform} />
+          </div>
+
+          {/* GPU + Canvas fingerprint */}
+          {(d.gpu || d.canvasFP) && (
+            <div style={{
+              display: 'flex', gap: 10, flexWrap: 'wrap',
+              background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`,
+              borderRadius: 8, padding: '8px 12px', marginBottom: 10,
+            }}>
+              {d.gpu      && <InfoChip label="GPU" value={d.gpu.slice(0, 60) + (d.gpu.length > 60 ? '…' : '')} color={C.teal} />}
+              {d.canvasFP && <InfoChip label="Canvas Fingerprint" value={`#${d.canvasFP}`} color={C.textSoft} />}
+            </div>
+          )}
+        </>
       )}
 
-      {/* Hardware / Software */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
-        gap: '8px 16px', background: 'rgba(255,255,255,0.02)',
-        border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px', marginBottom: 10,
-      }}>
-        <InfoChip label="Tela"         value={d.screen} />
-        <InfoChip label="Pixel Ratio"  value={d.pixelRatio ? `${d.pixelRatio}x` : null} />
-        <InfoChip label="Cor"          value={d.colorDepth ? `${d.colorDepth}-bit` : null} />
-        <InfoChip label="CPU (cores)"  value={d.cpuCores ? `${d.cpuCores} cores` : null} />
-        <InfoChip label="RAM"          value={d.ramGB ? `~${d.ramGB} GB` : null} />
-        <InfoChip label="Timezone"     value={d.timezone} />
-        <InfoChip label="Idioma"       value={d.language} />
-        <InfoChip label="Rede"         value={d.network} />
-        <InfoChip label="Plataforma"   value={d.platform} />
-      </div>
-
-      {/* GPU + Canvas fingerprint */}
-      {(d.gpu || d.canvasFP) && (
+      {/* Permissões */}
+      {d.apelido && d.status === 'approved' && (
         <div style={{
-          display: 'flex', gap: 10, flexWrap: 'wrap',
           background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`,
-          borderRadius: 8, padding: '8px 12px', marginBottom: 10,
+          borderRadius: 8, padding: '10px 12px', marginBottom: 10,
         }}>
-          {d.gpu      && <InfoChip label="GPU" value={d.gpu.slice(0, 60) + (d.gpu.length > 60 ? '…' : '')} color={C.teal} />}
-          {d.canvasFP && <InfoChip label="Canvas Fingerprint" value={`#${d.canvasFP}`} color={C.textSoft} />}
+          <div style={{ fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8 }}>Permissões</div>
+          {/* Admin toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: C.text }}>Administrador</span>
+            <button
+              style={{ ...btn(isAdmin ? 'primary' : 'ghost', 'sm'), minWidth: 70 }}
+              onClick={() => toggleAdmin(d.apelido, isAdmin)}
+            >
+              {isAdmin ? 'Remover' : 'Conceder'}
+            </button>
+          </div>
+          {/* Role selector */}
+          {!isAdmin && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: C.text }}>Nível de acesso</span>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {['full', 'senior'].map(r => (
+                    <button key={r} style={{
+                      ...btn(localRole === r ? 'primary' : 'ghost', 'sm'),
+                      fontSize: 11,
+                    }} onClick={() => setLocalRole(r)}>
+                      {r === 'full' ? 'Total' : 'Sênior'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {localRole === 'senior' && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>Mundos permitidos (vazio = todos):</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {(servers || SERVERS).map(s => {
+                      const checked = localAllowed.includes(s.id)
+                      return (
+                        <button key={s.id} style={{
+                          fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
+                          background: checked ? `${s.color}22` : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${checked ? s.color + '80' : C.border}`,
+                          color: checked ? s.color : C.textMuted, fontWeight: checked ? 700 : 400,
+                        }} onClick={() => toggleWorld(s.id)}>
+                          {s.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  style={{ ...btn('teal', 'sm'), opacity: savingPerm ? 0.6 : 1 }}
+                  disabled={savingPerm}
+                  onClick={async () => {
+                    setSavingPerm(true)
+                    await savePerms(d.token, localRole, localRole === 'senior' ? localAllowed : [])
+                    setSavingPerm(false)
+                  }}
+                >
+                  {savingPerm ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={11} />}
+                  Salvar
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {/* Botões */}
+      {/* Botões de ação */}
       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
         {d.status !== 'approved' && (
           <button style={{ ...btn('teal', 'sm') }} onClick={() => act('/api/auth/devices/approve', d.token)}>
@@ -3312,13 +3460,24 @@ function DevicesPanel() {
 
   return (
     <div>
+      {/* Search bar */}
+      <div style={{ position: 'relative', marginBottom: 14 }}>
+        <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: C.textMuted, pointerEvents: 'none' }} />
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Filtrar por apelido, navegador ou sistema…"
+          style={{ ...inputBase, paddingLeft: 30, borderRadius: 10, width: '100%', fontSize: 12 }}
+        />
+      </div>
+
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
           <Loader2 size={20} color={C.primaryBright} style={{ animation: 'spin 1s linear infinite' }} />
         </div>
-      ) : devices.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div style={{ textAlign: 'center', color: C.textMuted, fontSize: 13, padding: 16 }}>
-          Nenhum dispositivo registrado.
+          {search ? 'Nenhum dispositivo encontrado.' : 'Nenhum dispositivo registrado.'}
         </div>
       ) : (
         <>
@@ -3378,11 +3537,15 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
     <Modal open={open} onClose={onClose} title="Configurações" icon={Settings} maxWidth={520}>
       {/* Tabs */}
       {(() => {
-        const baseTabs = [
-          { key: 'config', label: 'Regras', icon: Activity },
-          { key: 'ambiente', label: 'Ambiente', icon: Lock },
-          { key: 'mundos', label: 'Mundos', icon: Swords },
-          { key: 'devices', label: 'Dispositivos', icon: Globe },
+        const isSenior = meInfo?.role === 'senior'
+        const baseTabs = isSenior ? [
+          { key: 'config',   label: 'Regras',       icon: Activity },
+          { key: 'ambiente', label: 'Ambiente',      icon: Lock },
+        ] : [
+          { key: 'config',   label: 'Regras',        icon: Activity },
+          { key: 'ambiente', label: 'Ambiente',       icon: Lock },
+          { key: 'mundos',   label: 'Mundos',         icon: Swords },
+          { key: 'devices',  label: 'Dispositivos',   icon: Globe },
         ]
         const allTabs = meInfo?.isAdmin
           ? [...baseTabs, { key: 'admin', label: 'Admin', icon: Crown }]
@@ -3405,8 +3568,8 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
         )
       })()}
 
-      {tab === 'devices' ? <DevicesPanel /> :
-       tab === 'ambiente' ? <EnvConfigPanel servers={servers} envConfigs={envConfigs} onUpdateEnv={onUpdateEnv} /> :
+      {tab === 'devices' ? <DevicesPanel servers={servers} meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> :
+       tab === 'ambiente' ? <EnvConfigPanel servers={servers} envConfigs={envConfigs} onUpdateEnv={onUpdateEnv} canRename={meInfo?.role !== 'senior'} /> :
        tab === 'mundos'   ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> :
        tab === 'admin'    ? <AdminPanel meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> : (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -3495,7 +3658,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
 }
 
 // ── EnvConfigPanel ────────────────────────────────────────────────────────────
-function EnvConfigPanel({ servers, envConfigs, onUpdateEnv }) {
+function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) {
   const serverId = getServer()
   const srv = (servers || SERVERS).find(s => s.id === serverId) || {}
   const cfg = envConfigs?.[serverId] || {}
@@ -3548,12 +3711,14 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv }) {
         </div>
       )}
 
-      {/* Nome do ambiente */}
+      {/* Nome do ambiente — apenas para admins/full */}
+      {canRename && (
       <div>
         <label style={labelStyle}><Globe size={11} /> Nome do Ambiente</label>
         <input style={inputBase} value={name} onChange={e => setName(e.target.value)} maxLength={60} placeholder={srv.name} />
         <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Somente este servidor. O nome padrão é "{srv.name}".</div>
       </div>
+      )}
 
       {/* Bloqueio */}
       <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px' }}>
@@ -3593,7 +3758,7 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv }) {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   style={{ ...inputBase, paddingRight: 40 }}
-                  placeholder="Mínimo 4 caracteres"
+                  placeholder={cfg.hasPassword ? '••••••• (senha já definida)' : 'Mínimo 4 caracteres'}
                   maxLength={128}
                 />
                 <button type="button" onClick={() => setShowPwd(v => !v)} style={{
@@ -3634,12 +3799,15 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv }) {
 function MundosPanel({ servers, onUpdateEnv, meInfo }) {
   const list = servers || SERVERS
   const isAdmin = meInfo?.isAdmin
-  const [adding, setAdding]     = useState(false)
-  const [newName, setNewName]   = useState('')
-  const [newColor, setNewColor] = useState(ENV_COLORS[0])
-  const [saving, setSaving]     = useState(false)
-  const [toast, setToast]       = useState('')
+  const [adding, setAdding]       = useState(false)
+  const [newName, setNewName]     = useState('')
+  const [newColor, setNewColor]   = useState(ENV_COLORS[0])
+  const [saving, setSaving]       = useState(false)
+  const [toast, setToast]         = useState('')
   const [confirmDel, setConfirmDel] = useState(null)
+  const [editingId, setEditingId] = useState(null)
+  const [editName, setEditName]   = useState('')
+  const [editColor, setEditColor] = useState('')
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500) }
 
@@ -3687,6 +3855,24 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
     finally { setSaving(false); setConfirmDel(null) }
   }
 
+  const startEdit = s => { setEditingId(s.id); setEditName(s.name); setEditColor(s.color) }
+
+  const handleEditSave = async id => {
+    if (!editName.trim()) return
+    setSaving(true)
+    const updated = list.map(s => s.id === id ? { ...s, name: editName.trim(), color: editColor } : s)
+    try {
+      const r = await apiFetch('/api/env/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ list: updated }),
+      })
+      if (r.ok) { await onUpdateEnv?.(); showToast('Ambiente atualizado!'); setEditingId(null) }
+      else showToast('Erro ao salvar')
+    } catch { showToast('Erro de conexão') }
+    finally { setSaving(false) }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {toast && (
@@ -3701,7 +3887,34 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
 
       {/* Lista de ambientes */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {list.map(s => (
+        {list.map(s => editingId === s.id ? (
+          <div key={s.id} style={{ background: 'rgba(99,102,241,0.07)', border: `1px solid ${C.borderLight}`, borderRadius: 10, padding: '12px 14px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                <label style={labelStyle}><Globe size={11} /> Nome</label>
+                <input style={inputBase} value={editName} onChange={e => setEditName(e.target.value)} maxLength={60} autoFocus />
+              </div>
+              <div>
+                <label style={labelStyle}><Palette size={11} /> Cor</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {ENV_COLORS.map(c => (
+                    <button key={c} onClick={() => setEditColor(c)} style={{
+                      width: 24, height: 24, borderRadius: 6, background: c,
+                      border: `2px solid ${editColor === c ? '#fff' : 'transparent'}`,
+                      cursor: 'pointer', transform: editColor === c ? 'scale(1.2)' : 'none', transition: 'transform .1s',
+                    }} />
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                <button onClick={() => setEditingId(null)} style={btn('ghost', 'sm')}><X size={12} /> Cancelar</button>
+                <button onClick={() => handleEditSave(s.id)} disabled={!editName.trim() || saving} style={{ ...btn('gold', 'sm'), opacity: !editName.trim() ? 0.5 : 1 }}>
+                  <Save size={12} /> Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
           <div key={s.id} style={{
             display: 'flex', alignItems: 'center', gap: 12,
             background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`,
@@ -3715,20 +3928,22 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
             {s.id === getServer() && (
               <span style={{ fontSize: 10, color: C.gold, background: 'rgba(245,158,11,0.12)', padding: '2px 8px', borderRadius: 6 }}>atual</span>
             )}
-            {isAdmin && (confirmDel === s.id ? (
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => handleDelete(s.id)} disabled={saving} style={{ ...btn('danger', 'sm') }}><Check size={12} /> Confirmar</button>
-                <button onClick={() => setConfirmDel(null)} style={{ ...btn('ghost', 'sm') }}><X size={12} /></button>
+            {isAdmin && (
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button onClick={() => startEdit(s)} style={{ ...btn('ghost', 'sm') }}><Pencil size={12} /></button>
+                {confirmDel === s.id ? (
+                  <>
+                    <button onClick={() => handleDelete(s.id)} disabled={saving} style={{ ...btn('danger', 'sm') }}><Check size={12} /></button>
+                    <button onClick={() => setConfirmDel(null)} style={{ ...btn('ghost', 'sm') }}><X size={12} /></button>
+                  </>
+                ) : (
+                  <button onClick={() => setConfirmDel(s.id)} disabled={list.length <= 1}
+                    style={{ ...btn('ghost', 'sm'), opacity: list.length <= 1 ? 0.3 : 1 }}>
+                    <Trash2 size={12} />
+                  </button>
+                )}
               </div>
-            ) : (
-              <button
-                onClick={() => setConfirmDel(s.id)}
-                disabled={list.length <= 1}
-                style={{ ...btn('ghost', 'sm'), opacity: list.length <= 1 ? 0.3 : 1 }}
-              >
-                <Trash2 size={12} />
-              </button>
-            ))}
+            )}
           </div>
         ))}
       </div>
@@ -4140,7 +4355,7 @@ const SEEN_KEY = 'rubinot_seen_alerts'
 const loadSeenMap = () => { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') } catch { return {} } }
 const saveSeenMap = m => localStorage.setItem(SEEN_KEY, JSON.stringify(m))
 
-function Header({ tab, setTab, tutores, servers: serversProp, onOpenSettings, onOpenSettingsDevices, onChangeServer }) {
+function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSettings, onOpenSettingsDevices, onChangeServer }) {
   const [scrolled, setScrolled]           = useState(false)
   const [bellOpen, setBellOpen]           = useState(false)
   const [hovered, setHovered]             = useState(null)
@@ -4168,10 +4383,10 @@ function Header({ tab, setTab, tutores, servers: serversProp, onOpenSettings, on
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
-  const alertas = (tutores || []).filter(t =>
+  const alertas = _cfg.atividadeAutomatica ? (tutores || []).filter(t =>
     (t.cargo === 'Sênior' || t.cargo === 'Tutor' || t.cargo === 'Em Teste') &&
     diasSemPresenca(t) !== null
-  )
+  ) : []
   const unseenCount = alertas.filter(t => {
     const dias = diasSemPresenca(t)
     const seenAt = seenMap[t.nick]
@@ -4225,25 +4440,8 @@ function Header({ tab, setTab, tutores, servers: serversProp, onOpenSettings, on
           })()}
         </div>
 
-        {/* Configurações */}
-        <button
-          onClick={onOpenSettings}
-          onMouseEnter={() => setHovered('settings')}
-          onMouseLeave={() => setHovered(null)}
-          title="Configurações"
-          style={{
-            background: hovered === 'settings' ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)',
-            border: `1px solid ${hovered === 'settings' ? C.borderLight : C.border}`,
-            borderRadius: 10, cursor: 'pointer',
-            color: hovered === 'settings' ? C.textSoft : C.textMuted,
-            padding: '8px 10px', display: 'flex', alignItems: 'center',
-            transition: 'all .18s',
-          }}
-        >
-          <Settings size={16} />
-        </button>
-
-        {/* Sino de notificações */}
+        {/* Sino de notificações — só para admins ou quando atividade automática */}
+        {(meInfo?.isAdmin || _cfg.atividadeAutomatica) && (
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => {
@@ -4429,6 +4627,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, onOpenSettings, on
             </>
           )}
         </div>
+        )}
 
         <nav style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           {[['cadastro', ClipboardList, 'Cadastro'], ['dashboard', BarChart2, 'Dashboard']].map(([key, Icon, label]) => {
@@ -4460,6 +4659,24 @@ function Header({ tab, setTab, tutores, servers: serversProp, onOpenSettings, on
             )
           })}
         </nav>
+
+        {/* Configurações — canto direito */}
+        <button
+          onClick={onOpenSettings}
+          onMouseEnter={() => setHovered('settings')}
+          onMouseLeave={() => setHovered(null)}
+          title="Configurações"
+          style={{
+            background: hovered === 'settings' ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${hovered === 'settings' ? C.borderLight : C.border}`,
+            borderRadius: 10, cursor: 'pointer',
+            color: hovered === 'settings' ? C.textSoft : C.textMuted,
+            padding: '8px 10px', display: 'flex', alignItems: 'center',
+            transition: 'all .18s',
+          }}
+        >
+          <Settings size={16} />
+        </button>
       </div>
     </header>
   )
@@ -4771,8 +4988,9 @@ function EnvPasswordScreen({ server, onSuccess, onBack }) {
 }
 
 // ── ServerSelectScreen ────────────────────────────────────────────────────────
-function ServerSelectScreen({ onSelect, servers: serverList, envConfigs }) {
-  const list = serverList || SERVERS
+function ServerSelectScreen({ onSelect, servers: serverList, envConfigs, allowedServers }) {
+  const fullList = serverList || SERVERS
+  const list = allowedServers ? fullList.filter(s => allowedServers.includes(s.id)) : fullList
   const [hov, setHov] = useState(null)
   const cols = list.length <= 4 ? '1fr 1fr' : '1fr 1fr 1fr'
   return (
@@ -5201,7 +5419,20 @@ function AuthGate() {
         const vr = await fetch(API + '/api/auth/verify', { headers: { 'x-auth-token': authToken } })
         if (vr.ok) {
           await loadEnvData()
-          setStatus(getServer() ? 'ok' : 'server-select')
+          const meR = await apiFetch('/api/auth/me')
+          if (meR.ok) {
+            const me = await meR.json()
+            setMeInfo(me)
+            const saved = getServer()
+            const allowed = me.allowedServers
+            if (!saved || (allowed && !allowed.includes(saved))) {
+              setStatus('server-select')
+            } else {
+              setStatus('ok')
+            }
+          } else {
+            setStatus(getServer() ? 'ok' : 'server-select')
+          }
         } else {
           setStatus('login')
         }
@@ -5249,6 +5480,8 @@ function AuthGate() {
   }
 
   const handleSelectServer = id => {
+    const allowed = meInfo?.allowedServers
+    if (allowed && !allowed.includes(id)) return
     const cfg = envConfigs[id] || {}
     const locked = cfg.locked && cfg.hasPassword
     const alreadyUnlocked = sessionStorage.getItem(`env_unlocked:${id}`)
@@ -5292,6 +5525,7 @@ function AuthGate() {
       onSelect={handleSelectServer}
       servers={servers}
       envConfigs={envConfigs}
+      allowedServers={meInfo?.allowedServers}
     />
   )
   return (
@@ -5391,7 +5625,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     <div style={{ minHeight: '100vh', background: 'transparent', position: 'relative', zIndex: 1 }}>
       <BackgroundImage />
       <div style={{ position: 'relative', zIndex: 1 }}>
-        <Header tab={tab} setTab={setTab} tutores={tutores} servers={serversProp} onOpenSettings={() => openSettings('config')} onOpenSettingsDevices={() => openSettings('devices')} onChangeServer={onChangeServer} />
+        <Header tab={tab} setTab={setTab} tutores={tutores} servers={serversProp} meInfo={meInfo} onOpenSettings={() => openSettings('config')} onOpenSettingsDevices={() => openSettings('devices')} onChangeServer={onChangeServer} />
         <main key={tab} className="tab-enter" style={{ paddingBottom: 60 }}>
           {!dataLoaded ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 16 }}>
@@ -5401,7 +5635,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
           ) : (
             <>
               {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} />}
-              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKey={apiKey} onSaveApiKey={handleSaveApiKey} />}
+              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKey={apiKey} onSaveApiKey={handleSaveApiKey} servers={serversProp} envConfigs={envConfigs} />}
             </>
           )}
         </main>
