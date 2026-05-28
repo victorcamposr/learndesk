@@ -188,8 +188,23 @@ const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: { error: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+  standardHeaders: true, legacyHeaders: false,
+})
+
+// max 5 solicitações por hora por IP
+const requestAccessLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Muitas solicitações. Tente novamente em 1 hora.' },
+  standardHeaders: true, legacyHeaders: false,
+})
+
+// max 20 verificações por minuto por IP (auto-poll a cada 30s = 2/min normalmente)
+const deviceStatusLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: 'Muitas requisições.' },
+  standardHeaders: true, legacyHeaders: false,
 })
 
 // ── Auth endpoints (públicos) ──────────────────────────────────────────────────
@@ -239,7 +254,7 @@ async function geolocateIP(ip) {
   } catch { return null }
 }
 
-app.post('/api/auth/request-access', async (req, res) => {
+app.post('/api/auth/request-access', requestAccessLimiter, async (req, res) => {
   const { deviceToken, info } = req.body || {}
   if (!deviceToken || typeof deviceToken !== 'string' || deviceToken.length !== 64)
     return res.status(400).json({ error: 'Token de dispositivo inválido.' })
@@ -287,7 +302,7 @@ app.post('/api/auth/request-access', async (req, res) => {
   res.json({ status: d.status })
 })
 
-app.post('/api/auth/device-status', (req, res) => {
+app.post('/api/auth/device-status', deviceStatusLimiter, (req, res) => {
   const { deviceToken } = req.body || {}
   if (!deviceToken || typeof deviceToken !== 'string') return res.json({ status: 'unknown' })
   const device = getDevices()[deviceToken]

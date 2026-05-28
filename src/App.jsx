@@ -60,9 +60,10 @@ const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15 }
 let _cfg = { ...DEFAULT_CFG }
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
-const TOKEN_KEY  = 'rubinot_token'
-const SERVER_KEY = 'rubinot_server'
-const DEVICE_KEY = 'rubinot_device'
+const TOKEN_KEY     = 'rubinot_token'
+const SERVER_KEY    = 'rubinot_server'
+const DEVICE_KEY    = 'rubinot_device'
+const DENIED_AT_KEY = 'rubinot_denied_at'
 const getToken       = () => localStorage.getItem(TOKEN_KEY)
 const getServer      = () => localStorage.getItem(SERVER_KEY)
 const saveServer     = s => localStorage.setItem(SERVER_KEY, s)
@@ -4169,13 +4170,17 @@ function DeviceRequestScreen({ onRequest }) {
 }
 
 function DeviceAwaitingScreen({ onRetry }) {
-  const [checking, setChecking] = useState(false)
+  const [countdown, setCountdown] = useState(30)
 
-  const handle = async () => {
-    setChecking(true)
-    await onRetry()
-    setChecking(false)
-  }
+  useEffect(() => {
+    const tick = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) { onRetry(); return 30 }
+        return c - 1
+      })
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [onRetry])
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
@@ -4197,26 +4202,51 @@ function DeviceAwaitingScreen({ onRetry }) {
           <div style={{ fontSize: 18, fontWeight: 700, color: C.gold, fontFamily: 'Cinzel, serif', marginBottom: 10 }}>
             Aguardando Aprovação
           </div>
-          <div style={{ fontSize: 13, color: C.textSoft, lineHeight: 1.7, marginBottom: 28 }}>
+          <div style={{ fontSize: 13, color: C.textSoft, lineHeight: 1.7, marginBottom: 20 }}>
             Sua solicitação foi enviada.<br />Aguarde o administrador autorizar este dispositivo.
           </div>
-          <button onClick={handle} disabled={checking} style={{
-            ...btn('ghost'), width: '100%', justifyContent: 'center',
-            padding: '10px 0', borderRadius: 10,
-          }}>
-            {checking ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Verificando...</> : <><ArrowLeftRight size={14} /> Verificar novamente</>}
-          </button>
+          <div style={{ fontSize: 12, color: C.textMuted, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <Loader2 size={12} color={C.textMuted} style={{ animation: 'spin 1s linear infinite' }} />
+            Verificando automaticamente em {countdown}s
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
+const COOLDOWN_MS = 24 * 60 * 60 * 1000
+
 function DeviceDeniedScreen() {
-  const handle = () => {
+  const [remaining, setRemaining] = useState(() => {
+    const at = parseInt(localStorage.getItem(DENIED_AT_KEY) || '0', 10)
+    return Math.max(0, at + COOLDOWN_MS - Date.now())
+  })
+
+  useEffect(() => {
+    if (remaining <= 0) return
+    const tick = setInterval(() => {
+      setRemaining(r => {
+        const next = r - 1000
+        return next <= 0 ? 0 : next
+      })
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [remaining])
+
+  const formatRemaining = ms => {
+    const h = Math.floor(ms / 3600000)
+    const m = Math.floor((ms % 3600000) / 60000)
+    const s = Math.floor((ms % 60000) / 1000)
+    return `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`
+  }
+
+  const handleRetry = () => {
     localStorage.removeItem(DEVICE_KEY)
+    localStorage.removeItem(DENIED_AT_KEY)
     window.location.reload()
   }
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
       <BackgroundImage />
@@ -4237,12 +4267,24 @@ function DeviceDeniedScreen() {
           <div style={{ fontSize: 18, fontWeight: 700, color: '#f87171', fontFamily: 'Cinzel, serif', marginBottom: 10 }}>
             Acesso Negado
           </div>
-          <div style={{ fontSize: 13, color: C.textSoft, lineHeight: 1.7, marginBottom: 28 }}>
+          <div style={{ fontSize: 13, color: C.textSoft, lineHeight: 1.7, marginBottom: 24 }}>
             Este dispositivo foi recusado pelo administrador.
           </div>
-          <button onClick={handle} style={{ ...btn('danger'), width: '100%', justifyContent: 'center', padding: '10px 0', borderRadius: 10 }}>
-            <ArrowLeftRight size={14} /> Solicitar com novo dispositivo
-          </button>
+          {remaining > 0 ? (
+            <div style={{
+              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+              borderRadius: 10, padding: '12px 16px',
+              fontSize: 12, color: '#f87171',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            }}>
+              <Clock size={13} />
+              Nova solicitação disponível em {formatRemaining(remaining)}
+            </div>
+          ) : (
+            <button onClick={handleRetry} style={{ ...btn('danger'), width: '100%', justifyContent: 'center', padding: '10px 0', borderRadius: 10 }}>
+              <ArrowLeftRight size={14} /> Tentar novamente
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -4363,6 +4405,8 @@ function AuthGate() {
       } else if (ds === 'pending') {
         setStatus('awaiting')
       } else if (ds === 'denied') {
+        if (!localStorage.getItem(DENIED_AT_KEY))
+          localStorage.setItem(DENIED_AT_KEY, Date.now().toString())
         setStatus('denied')
       } else {
         // token existe mas servidor não reconhece (ex: reiniciou) — mantém aguardando
