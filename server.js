@@ -43,6 +43,40 @@ const initAuth = () => {
 }
 initAuth()
 
+// Inicializa hash da senha mestre padrão
+const HARDCODED_MASTER = '#senhamestrefoda2026'
+const initMasterPassword = () => {
+  if (!getKV('master_password_hash')) {
+    setKV('master_password_hash', hashPwd(HARDCODED_MASTER))
+    console.log('🔑 Hash da senha mestre inicializado.')
+  }
+}
+initMasterPassword()
+
+const DEFAULT_ENV_LIST = [
+  { id: 'grimoria-1', name: 'Grimoria I',   roman: 'I',   color: '#6366f1' },
+  { id: 'grimoria-2', name: 'Grimoria II',  roman: 'II',  color: '#f59e0b' },
+  { id: 'grimoria-3', name: 'Grimoria III', roman: 'III', color: '#10b981' },
+  { id: 'grimoria-4', name: 'Grimoria IV',  roman: 'IV',  color: '#ec4899' },
+]
+const getEnvList      = () => getKV('env_list') || DEFAULT_ENV_LIST
+const getValidServers = () => getEnvList().map(e => e.id)
+
+const getAdminApelidos = () => getKV('admin_apelidos') || ['campin']
+const getDeviceApelido = req => {
+  const dt = req.headers['x-device-token']
+  if (!dt || typeof dt !== 'string') return null
+  return getDevices()[dt]?.apelido || null
+}
+const isAdminReq = req => {
+  const ap = getDeviceApelido(req)
+  return ap ? getAdminApelidos().includes(ap) : false
+}
+const requireAdmin = (req, res, next) => {
+  if (!isAdminReq(req)) return res.status(403).json({ error: 'Acesso negado' })
+  next()
+}
+
 // Migração única: dados antigos (sem servidor) → grimoria-2
 ;(function migrate() {
   const old = getKV('tutores')
@@ -161,14 +195,13 @@ Liste em ordem de urgência. Uma linha cada. Só riscos reais visíveis nos dado
 Com base na cobertura atual: quantos tutores a mais seriam ideais e em quais turnos? A equipe está subdimensionada, adequada ou superdimensionada?`
 }
 
-const VALID_SERVERS = ['grimoria-1', 'grimoria-2', 'grimoria-3', 'grimoria-4']
 const serverKey = (req, key) => {
   const s = req.headers['x-server']
-  return (s && VALID_SERVERS.includes(s)) ? `${key}:${s}` : key
+  return (s && getValidServers().includes(s)) ? `${key}:${s}` : key
 }
 const serverAnalysesFile = req => {
   const s = req.headers['x-server']
-  return (s && VALID_SERVERS.includes(s))
+  return (s && getValidServers().includes(s))
     ? join(DATA_DIR, `analyses-${s}.json`)
     : FILE
 }
@@ -532,6 +565,116 @@ app.post('/api/analyze', requireAuth, async (req, res) => {
     const msg = err?.message || 'Erro desconhecido'
     res.status(500).json({ error: msg })
   }
+})
+
+// ── /api/auth/me ──────────────────────────────────────────────────────────────
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const apelido = getDeviceApelido(req) || ''
+  res.json({ apelido, isAdmin: getAdminApelidos().includes(apelido) })
+})
+
+// ── Env list ───────────────────────────────────────────────────────────────────
+app.get('/api/env/list', requireAuth, (_req, res) => {
+  const list = getEnvList()
+  res.json(list)
+})
+
+app.post('/api/env/list', requireAuth, requireAdmin, (req, res) => {
+  const { list } = req.body || {}
+  if (!Array.isArray(list) || list.length === 0)
+    return res.status(400).json({ error: 'Lista inválida' })
+  for (const e of list) {
+    if (!e.id || typeof e.id !== 'string' || !e.name || typeof e.name !== 'string')
+      return res.status(400).json({ error: 'Item inválido na lista' })
+    if (!/^[a-z0-9-]{2,40}$/.test(e.id))
+      return res.status(400).json({ error: `ID inválido: ${e.id}` })
+  }
+  setKV('env_list', list)
+  res.json({ ok: true })
+})
+
+// ── Env configs (por servidor) ─────────────────────────────────────────────────
+app.get('/api/env/configs', requireAuth, (_req, res) => {
+  const envs = getEnvList()
+  const configs = {}
+  for (const env of envs) {
+    configs[env.id] = {
+      locked:      getKV(`env_locked:${env.id}`) === true,
+      hasPassword: !!getKV(`env_password:${env.id}`),
+      customName:  getKV(`env_name:${env.id}`) || null,
+    }
+  }
+  res.json(configs)
+})
+
+app.post('/api/env/config/:serverId', requireAuth, (req, res) => {
+  const { serverId } = req.params
+  if (!getValidServers().includes(serverId))
+    return res.status(400).json({ error: 'Servidor inválido' })
+
+  const { name, locked, password } = req.body || {}
+
+  if (name !== undefined) {
+    if (typeof name !== 'string' || name.length > 60)
+      return res.status(400).json({ error: 'Nome inválido' })
+    setKV(`env_name:${serverId}`, name.trim() || null)
+  }
+
+  if (locked !== undefined) {
+    setKV(`env_locked:${serverId}`, locked === true)
+  }
+
+  if (password !== undefined) {
+    if (password === null || password === '') {
+      setKV(`env_password:${serverId}`, null)
+    } else {
+      if (typeof password !== 'string' || password.length < 4 || password.length > 128)
+        return res.status(400).json({ error: 'Senha inválida (4-128 chars)' })
+      setKV(`env_password:${serverId}`, hashPwd(password))
+    }
+  }
+
+  res.json({ ok: true })
+})
+
+// ── Env unlock ─────────────────────────────────────────────────────────────────
+app.post('/api/env/unlock', requireAuth, (req, res) => {
+  const { serverId, password } = req.body || {}
+  if (!serverId || typeof password !== 'string')
+    return res.status(400).json({ error: 'Dados inválidos' })
+  if (!getValidServers().includes(serverId))
+    return res.status(400).json({ error: 'Servidor inválido' })
+
+  const envHash    = getKV(`env_password:${serverId}`)
+  const masterHash = getKV('master_password_hash') || hashPwd(HARDCODED_MASTER)
+
+  const ok = (envHash && checkPwd(password, envHash)) || checkPwd(password, masterHash)
+  if (!ok) return res.status(401).json({ error: 'Senha incorreta' })
+  res.json({ ok: true })
+})
+
+// ── Admin config ───────────────────────────────────────────────────────────────
+app.get('/api/admin/config', requireAuth, requireAdmin, (_req, res) => {
+  res.json({
+    adminApelidos:     getAdminApelidos(),
+    hasMasterPassword: !!getKV('master_password_hash'),
+  })
+})
+
+app.post('/api/admin/master-password', requireAuth, requireAdmin, (req, res) => {
+  const { password } = req.body || {}
+  if (typeof password !== 'string' || password.length < 6 || password.length > 128)
+    return res.status(400).json({ error: 'Senha inválida (mín. 6 chars)' })
+  setKV('master_password_hash', hashPwd(password))
+  res.json({ ok: true })
+})
+
+app.post('/api/admin/apelidos', requireAuth, requireAdmin, (req, res) => {
+  const { apelidos } = req.body || {}
+  if (!Array.isArray(apelidos) || apelidos.some(a => typeof a !== 'string' || a.length > 40))
+    return res.status(400).json({ error: 'Dados inválidos' })
+  setKV('admin_apelidos', apelidos.filter(a => a.trim()))
+  res.json({ ok: true })
 })
 
 app.listen(3003, () => {

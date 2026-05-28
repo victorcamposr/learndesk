@@ -13,6 +13,7 @@ import {
   AtSign, Sparkles, Loader2, Eye, EyeOff, History, Copy,
   CalendarCheck, CalendarPlus, Bell, Settings, Bot, Send, Mail,
   Globe, Rocket, ArrowLeftRight, LayoutGrid, List,
+  Lock, LockOpen, Key, Crown, Palette, Swords,
 } from 'lucide-react'
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
@@ -148,11 +149,18 @@ function getDeviceInfo() {
   }
 }
 
-const SERVERS = [
+const DEFAULT_SERVERS = [
   { id: 'grimoria-1', name: 'Grimoria I',   roman: 'I',   color: '#6366f1' },
   { id: 'grimoria-2', name: 'Grimoria II',  roman: 'II',  color: '#f59e0b' },
   { id: 'grimoria-3', name: 'Grimoria III', roman: 'III', color: '#10b981' },
   { id: 'grimoria-4', name: 'Grimoria IV',  roman: 'IV',  color: '#ec4899' },
+]
+let SERVERS = [...DEFAULT_SERVERS]
+
+const ENV_COLORS = [
+  '#6366f1', '#f59e0b', '#10b981', '#ec4899',
+  '#3b82f6', '#8b5cf6', '#ef4444', '#14b8a6',
+  '#f97316', '#84cc16', '#e879f9', '#fbbf24',
 ]
 
 const API  = import.meta.env.VITE_API_URL || ''
@@ -161,12 +169,14 @@ const BASE = import.meta.env.BASE_URL
 function apiFetch(url, opts = {}) {
   const token  = getToken()
   const server = getServer()
+  const device = getDeviceToken()
   return fetch(API + url, {
     ...opts,
     headers: {
       ...(opts.headers || {}),
-      ...(token  ? { 'x-auth-token': token }  : {}),
-      ...(server ? { 'x-server':     server } : {}),
+      ...(token  ? { 'x-auth-token':   token  } : {}),
+      ...(server ? { 'x-server':       server } : {}),
+      ...(device ? { 'x-device-token': device } : {}),
     },
   })
 }
@@ -3335,7 +3345,7 @@ function DevicesPanel() {
 }
 
 // ── SettingsModal ─────────────────────────────────────────────────────────────
-function SettingsModal({ open, onClose, onSave, initialTab = 'config' }) {
+function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, envConfigs, meInfo, onUpdateEnv }) {
   const [form, setForm] = useState({ ...DEFAULT_CFG })
   const [tab, setTab]   = useState('config')
   useEffect(() => { if (open) { setForm({ ..._cfg }); setTab(initialTab) } }, [open, initialTab])
@@ -3367,22 +3377,38 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config' }) {
   return (
     <Modal open={open} onClose={onClose} title="Configurações" icon={Settings} maxWidth={520}>
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 20, borderBottom: `1px solid ${C.border}`, paddingBottom: 12 }}>
-        {[{ key: 'config', label: 'Regras', icon: Activity }, { key: 'devices', label: 'Dispositivos', icon: Globe }].map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setTab(key)} style={{
-            background: tab === key ? `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})` : 'transparent',
-            border: `1px solid ${tab === key ? C.primaryBright + '55' : C.border}`,
-            borderRadius: 8, color: tab === key ? C.text : C.textSoft,
-            cursor: 'pointer', fontSize: 12, fontWeight: tab === key ? 600 : 400,
-            padding: '6px 14px', transition: 'all .15s',
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-          }}>
-            <Icon size={12} /> {label}
-          </button>
-        ))}
-      </div>
+      {(() => {
+        const baseTabs = [
+          { key: 'config', label: 'Regras', icon: Activity },
+          { key: 'ambiente', label: 'Ambiente', icon: Lock },
+          { key: 'mundos', label: 'Mundos', icon: Swords },
+          { key: 'devices', label: 'Dispositivos', icon: Globe },
+        ]
+        const allTabs = meInfo?.isAdmin
+          ? [...baseTabs, { key: 'admin', label: 'Admin', icon: Crown }]
+          : baseTabs
+        return (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 20, borderBottom: `1px solid ${C.border}`, paddingBottom: 12, flexWrap: 'wrap' }}>
+            {allTabs.map(({ key, label, icon: Icon }) => (
+              <button key={key} onClick={() => setTab(key)} style={{
+                background: tab === key ? `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})` : 'transparent',
+                border: `1px solid ${tab === key ? C.primaryBright + '55' : C.border}`,
+                borderRadius: 8, color: tab === key ? C.text : C.textSoft,
+                cursor: 'pointer', fontSize: 12, fontWeight: tab === key ? 600 : 400,
+                padding: '6px 14px', transition: 'all .15s',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+              }}>
+                <Icon size={12} /> {label}
+              </button>
+            ))}
+          </div>
+        )
+      })()}
 
-      {tab === 'devices' ? <DevicesPanel /> : (
+      {tab === 'devices' ? <DevicesPanel /> :
+       tab === 'ambiente' ? <EnvConfigPanel servers={servers} envConfigs={envConfigs} onUpdateEnv={onUpdateEnv} /> :
+       tab === 'mundos'   ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> :
+       tab === 'admin'    ? <AdminPanel meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> : (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
         {/* Toggle atividade automática */}
@@ -3465,6 +3491,436 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config' }) {
       </div>
       )}
     </Modal>
+  )
+}
+
+// ── EnvConfigPanel ────────────────────────────────────────────────────────────
+function EnvConfigPanel({ servers, envConfigs, onUpdateEnv }) {
+  const serverId = getServer()
+  const srv = (servers || SERVERS).find(s => s.id === serverId) || {}
+  const cfg = envConfigs?.[serverId] || {}
+
+  const [name, setName]         = useState('')
+  const [locked, setLocked]     = useState(false)
+  const [password, setPassword] = useState('')
+  const [password2, setPassword2] = useState('')
+  const [showPwd, setShowPwd]   = useState(false)
+  const [saving, setSaving]     = useState(false)
+  const [toast, setToast]       = useState('')
+
+  useEffect(() => {
+    setName(cfg.customName || srv.name || '')
+    setLocked(cfg.locked || false)
+    setPassword('')
+    setPassword2('')
+  }, [serverId, cfg.customName, cfg.locked, srv.name])
+
+  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500) }
+
+  const handleSave = async () => {
+    if (password && password !== password2) { showToast('As senhas não coincidem'); return }
+    if (locked && !cfg.hasPassword && !password) { showToast('Defina uma senha antes de ativar o bloqueio'); return }
+    setSaving(true)
+    try {
+      const body = { name }
+      if (locked !== cfg.locked) body.locked = locked
+      if (password) body.password = password
+      await apiFetch(`/api/env/config/${serverId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      await onUpdateEnv?.()
+      showToast('Salvo com sucesso!')
+      setPassword(''); setPassword2('')
+    } catch {
+      showToast('Erro ao salvar')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {toast && (
+        <div style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid #10b98140', borderRadius: 8, padding: '8px 14px', fontSize: 12, color: C.teal }}>
+          {toast}
+        </div>
+      )}
+
+      {/* Nome do ambiente */}
+      <div>
+        <label style={labelStyle}><Globe size={11} /> Nome do Ambiente</label>
+        <input style={inputBase} value={name} onChange={e => setName(e.target.value)} maxLength={60} placeholder={srv.name} />
+        <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>Somente este servidor. O nome padrão é "{srv.name}".</div>
+      </div>
+
+      {/* Bloqueio */}
+      <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: locked ? 16 : 0 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.text, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Lock size={13} color={locked ? C.gold : C.textMuted} /> Bloqueio por Senha
+            </div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 3 }}>
+              {cfg.hasPassword ? 'Senha configurada' : 'Sem senha definida'}
+            </div>
+          </div>
+          <button
+            onClick={() => setLocked(l => !l)}
+            style={{
+              width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+              background: locked ? C.gold : 'rgba(255,255,255,0.12)',
+              position: 'relative', flexShrink: 0, transition: 'background .2s',
+              boxShadow: locked ? `0 0 10px ${C.gold}60` : 'none',
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: 3, left: locked ? 23 : 3,
+              width: 18, height: 18, borderRadius: '50%', background: '#fff',
+              transition: 'left .2s', boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+            }} />
+          </button>
+        </div>
+
+        {locked && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div>
+              <label style={labelStyle}><Key size={11} /> {cfg.hasPassword ? 'Nova Senha (deixe vazio para manter)' : 'Definir Senha'}</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showPwd ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  style={{ ...inputBase, paddingRight: 40 }}
+                  placeholder="Mínimo 4 caracteres"
+                  maxLength={128}
+                />
+                <button type="button" onClick={() => setShowPwd(v => !v)} style={{
+                  position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted,
+                }}>
+                  {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            </div>
+            {password && (
+              <div>
+                <label style={labelStyle}><Key size={11} /> Confirmar Senha</label>
+                <input
+                  type={showPwd ? 'text' : 'password'}
+                  value={password2}
+                  onChange={e => setPassword2(e.target.value)}
+                  style={{ ...inputBase, border: password2 && password !== password2 ? '1px solid #ef444460' : `1px solid ${C.border}` }}
+                  maxLength={128}
+                />
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: C.textMuted }}>
+              A senha mestre também libera acesso a qualquer ambiente.
+            </div>
+          </div>
+        )}
+      </div>
+
+      <button onClick={handleSave} disabled={saving} style={{ ...btn('gold'), alignSelf: 'flex-end' }}>
+        {saving ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Salvando...</> : <><Save size={13} /> Salvar</>}
+      </button>
+    </div>
+  )
+}
+
+// ── MundosPanel ───────────────────────────────────────────────────────────────
+function MundosPanel({ servers, onUpdateEnv, meInfo }) {
+  const list = servers || SERVERS
+  const isAdmin = meInfo?.isAdmin
+  const [adding, setAdding]     = useState(false)
+  const [newName, setNewName]   = useState('')
+  const [newColor, setNewColor] = useState(ENV_COLORS[0])
+  const [saving, setSaving]     = useState(false)
+  const [toast, setToast]       = useState('')
+  const [confirmDel, setConfirmDel] = useState(null)
+
+  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500) }
+
+  const genId = name => {
+    const base = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 28)
+    return `${base}-${Math.random().toString(36).slice(2, 6)}`
+  }
+
+  const handleAdd = async () => {
+    if (!newName.trim()) return
+    setSaving(true)
+    const newEnv = { id: genId(newName), name: newName.trim(), color: newColor }
+    const updated = [...list, newEnv]
+    try {
+      const r = await apiFetch('/api/env/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ list: updated }),
+      })
+      if (r.ok) {
+        await onUpdateEnv?.()
+        showToast(`"${newName}" criado!`)
+        setAdding(false); setNewName(''); setNewColor(ENV_COLORS[0])
+      } else {
+        const e = await r.json()
+        showToast(e.error || 'Erro ao criar')
+      }
+    } catch { showToast('Erro de conexão') }
+    finally { setSaving(false) }
+  }
+
+  const handleDelete = async id => {
+    if (list.length <= 1) { showToast('Precisa ter ao menos 1 ambiente'); return }
+    setSaving(true)
+    const updated = list.filter(s => s.id !== id)
+    try {
+      const r = await apiFetch('/api/env/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ list: updated }),
+      })
+      if (r.ok) { await onUpdateEnv?.(); showToast('Ambiente removido') }
+      else showToast('Erro ao remover')
+    } catch { showToast('Erro de conexão') }
+    finally { setSaving(false); setConfirmDel(null) }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {toast && (
+        <div style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid #10b98140', borderRadius: 8, padding: '8px 14px', fontSize: 12, color: C.teal }}>
+          {toast}
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, color: C.textMuted }}>
+        Ambientes disponíveis. Os 4 padrões (Grimoria I–IV) aparecem enquanto nenhuma lista customizada for salva.
+      </div>
+
+      {/* Lista de ambientes */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {list.map(s => (
+          <div key={s.id} style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`,
+            borderRadius: 10, padding: '10px 14px',
+          }}>
+            <div style={{ width: 12, height: 12, borderRadius: 3, background: s.color, flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{s.name}</div>
+              <div style={{ fontSize: 10, color: C.textMuted }}>{s.id}</div>
+            </div>
+            {s.id === getServer() && (
+              <span style={{ fontSize: 10, color: C.gold, background: 'rgba(245,158,11,0.12)', padding: '2px 8px', borderRadius: 6 }}>atual</span>
+            )}
+            {isAdmin && (confirmDel === s.id ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => handleDelete(s.id)} disabled={saving} style={{ ...btn('danger', 'sm') }}><Check size={12} /> Confirmar</button>
+                <button onClick={() => setConfirmDel(null)} style={{ ...btn('ghost', 'sm') }}><X size={12} /></button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDel(s.id)}
+                disabled={list.length <= 1}
+                style={{ ...btn('ghost', 'sm'), opacity: list.length <= 1 ? 0.3 : 1 }}
+              >
+                <Trash2 size={12} />
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      {!isAdmin && (
+        <div style={{ fontSize: 11, color: C.textMuted, background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px' }}>
+          Apenas administradores podem criar ou remover ambientes.
+        </div>
+      )}
+
+      {/* Adicionar novo */}
+      {isAdmin && (!adding ? (
+        <button onClick={() => setAdding(true)} style={{ ...btn('subtle'), alignSelf: 'flex-start' }}>
+          <Plus size={13} /> Novo Ambiente
+        </button>
+      ) : (
+        <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.borderLight}`, borderRadius: 12, padding: '16px' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.primaryBright, marginBottom: 12 }}>Novo Ambiente</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div>
+              <label style={labelStyle}><Globe size={11} /> Nome</label>
+              <input style={inputBase} value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex: Reinos do Norte" maxLength={60} autoFocus />
+            </div>
+            <div>
+              <label style={labelStyle}><Palette size={11} /> Cor</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {ENV_COLORS.map(c => (
+                  <button key={c} onClick={() => setNewColor(c)} style={{
+                    width: 28, height: 28, borderRadius: 7, background: c, border: `2px solid ${newColor === c ? '#fff' : 'transparent'}`,
+                    cursor: 'pointer', transition: 'transform .1s', transform: newColor === c ? 'scale(1.2)' : 'none',
+                  }} />
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => { setAdding(false); setNewName('') }} style={btn('ghost', 'sm')}><X size={12} /> Cancelar</button>
+              <button onClick={handleAdd} disabled={!newName.trim() || saving} style={{ ...btn('primary', 'sm'), opacity: !newName.trim() ? 0.5 : 1 }}>
+                {saving ? <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> Criando...</> : <><Plus size={12} /> Criar</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── AdminPanel ────────────────────────────────────────────────────────────────
+function AdminPanel({ meInfo, onUpdateEnv }) {
+  const [adminList, setAdminList] = useState([])
+  const [newApelido, setNewApelido] = useState('')
+  const [masterPwd, setMasterPwd]   = useState('')
+  const [masterPwd2, setMasterPwd2] = useState('')
+  const [showMaster, setShowMaster] = useState(false)
+  const [saving, setSaving]         = useState(false)
+  const [toast, setToast]           = useState({ msg: '', ok: true })
+
+  useEffect(() => {
+    apiFetch('/api/admin/config').then(r => r.ok ? r.json() : {}).then(d => {
+      if (d.adminApelidos) setAdminList(d.adminApelidos)
+    }).catch(() => {})
+  }, [])
+
+  const showToast = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast({ msg: '', ok: true }), 2500) }
+
+  const handleSaveMaster = async () => {
+    if (masterPwd.length < 6) { showToast('Mínimo 6 caracteres', false); return }
+    if (masterPwd !== masterPwd2) { showToast('As senhas não coincidem', false); return }
+    setSaving(true)
+    try {
+      const r = await apiFetch('/api/admin/master-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: masterPwd }),
+      })
+      r.ok ? showToast('Senha mestre atualizada!') : showToast('Erro ao salvar', false)
+    } catch { showToast('Erro de conexão', false) }
+    finally { setSaving(false); setMasterPwd(''); setMasterPwd2('') }
+  }
+
+  const handleSaveAdmins = async () => {
+    setSaving(true)
+    try {
+      const r = await apiFetch('/api/admin/apelidos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apelidos: adminList }),
+      })
+      r.ok ? showToast('Lista de admins atualizada!') : showToast('Erro ao salvar', false)
+      await onUpdateEnv?.()
+    } catch { showToast('Erro de conexão', false) }
+    finally { setSaving(false) }
+  }
+
+  const addAdmin = () => {
+    const a = newApelido.trim()
+    if (!a || adminList.includes(a)) return
+    setAdminList(l => [...l, a])
+    setNewApelido('')
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+      {toast.msg && (
+        <div style={{
+          background: toast.ok ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+          border: `1px solid ${toast.ok ? '#10b98140' : '#ef444440'}`,
+          borderRadius: 8, padding: '8px 14px', fontSize: 12,
+          color: toast.ok ? C.teal : '#f87171',
+        }}>
+          {toast.msg}
+        </div>
+      )}
+
+      <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: C.gold, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <Crown size={13} /> Logado como <strong>{meInfo?.apelido || '—'}</strong>
+      </div>
+
+      {/* Senha mestre */}
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Key size={12} /> Senha Mestre Global
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ position: 'relative' }}>
+            <input
+              type={showMaster ? 'text' : 'password'}
+              value={masterPwd}
+              onChange={e => setMasterPwd(e.target.value)}
+              style={{ ...inputBase, paddingRight: 40 }}
+              placeholder="Nova senha mestre (mín. 6 chars)"
+              maxLength={128}
+            />
+            <button type="button" onClick={() => setShowMaster(v => !v)} style={{
+              position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+              background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted,
+            }}>
+              {showMaster ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+          {masterPwd && (
+            <input
+              type={showMaster ? 'text' : 'password'}
+              value={masterPwd2}
+              onChange={e => setMasterPwd2(e.target.value)}
+              style={{ ...inputBase, border: masterPwd2 && masterPwd !== masterPwd2 ? '1px solid #ef444460' : `1px solid ${C.border}` }}
+              placeholder="Confirmar nova senha mestre"
+              maxLength={128}
+            />
+          )}
+          <button onClick={handleSaveMaster} disabled={!masterPwd || saving} style={{ ...btn('gold', 'sm'), alignSelf: 'flex-start', opacity: !masterPwd ? 0.5 : 1 }}>
+            <Save size={12} /> Salvar Senha Mestre
+          </button>
+        </div>
+      </div>
+
+      {/* Admins */}
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Crown size={12} /> Administradores (por apelido)
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+          {adminList.map(a => (
+            <div key={a} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '7px 12px' }}>
+              <Crown size={11} color={C.gold} />
+              <span style={{ flex: 1, fontSize: 13, color: C.text }}>{a}</span>
+              {a !== meInfo?.apelido && (
+                <button onClick={() => setAdminList(l => l.filter(x => x !== a))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', display: 'flex' }}>
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            style={{ ...inputBase }}
+            value={newApelido}
+            onChange={e => setNewApelido(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addAdmin()}
+            placeholder="Apelido do dispositivo"
+            maxLength={40}
+          />
+          <button onClick={addAdmin} disabled={!newApelido.trim()} style={{ ...btn('subtle', 'sm'), flexShrink: 0 }}>
+            <Plus size={13} />
+          </button>
+        </div>
+        <button onClick={handleSaveAdmins} disabled={saving} style={{ ...btn('primary', 'sm'), marginTop: 10 }}>
+          <Save size={12} /> Salvar Admins
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -3684,7 +4140,7 @@ const SEEN_KEY = 'rubinot_seen_alerts'
 const loadSeenMap = () => { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') } catch { return {} } }
 const saveSeenMap = m => localStorage.setItem(SEEN_KEY, JSON.stringify(m))
 
-function Header({ tab, setTab, tutores, onOpenSettings, onOpenSettingsDevices, onChangeServer }) {
+function Header({ tab, setTab, tutores, servers: serversProp, onOpenSettings, onOpenSettingsDevices, onChangeServer }) {
   const [scrolled, setScrolled]           = useState(false)
   const [bellOpen, setBellOpen]           = useState(false)
   const [hovered, setHovered]             = useState(null)
@@ -3748,7 +4204,8 @@ function Header({ tab, setTab, tutores, onOpenSettings, onOpenSettingsDevices, o
             Gerenciamento de Tutores
           </div>
           {(() => {
-            const s = SERVERS.find(sv => sv.id === getServer())
+            const list = serversProp || SERVERS
+            const s = list.find(sv => sv.id === getServer())
             if (!s) return null
             return (
               <button
@@ -4212,48 +4669,166 @@ function FloatingChat({ tutores, setTutores, apiKey }) {
   )
 }
 
-// ── ServerSelectScreen ────────────────────────────────────────────────────────
-function ServerSelectScreen({ onSelect }) {
-  const [hov, setHov] = useState(null)
+// ── EnvPasswordScreen ─────────────────────────────────────────────────────────
+function EnvPasswordScreen({ server, onSuccess, onBack }) {
+  const [password, setPassword] = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
+  const inputRef = useRef(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  const handle = async e => {
+    e.preventDefault()
+    if (!password) return
+    setLoading(true)
+    setError('')
+    try {
+      const r = await apiFetch('/api/env/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverId: server.id, password }),
+      })
+      if (r.ok) {
+        sessionStorage.setItem(`env_unlocked:${server.id}`, '1')
+        onSuccess()
+      } else {
+        setError('Senha incorreta')
+      }
+    } catch {
+      setError('Erro de conexão')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
       <BackgroundImage />
-      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 520, padding: '0 20px' }}>
+      <BackgroundOrbs />
+      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 400, padding: '0 16px' }}>
+        <div style={{
+          background: C.card, border: `1px solid ${server.color}40`, borderRadius: 20,
+          padding: '40px 32px', backdropFilter: 'blur(20px)',
+          boxShadow: `0 8px 48px rgba(0,0,0,0.6), 0 0 0 1px ${server.color}20`,
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: 28 }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 14,
+              background: `${server.color}18`, border: `1px solid ${server.color}45`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px',
+            }}>
+              <Lock size={24} color={server.color} />
+            </div>
+            <div style={{ fontFamily: 'Cinzel, serif', fontWeight: 700, fontSize: 17, color: C.text, marginBottom: 6 }}>
+              {server.name}
+            </div>
+            <div style={{ fontSize: 12, color: C.textMuted }}>
+              Este ambiente está protegido por senha
+            </div>
+          </div>
+
+          <form onSubmit={handle}>
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelStyle}><Key size={11} /> Senha do Ambiente</label>
+              <input
+                ref={inputRef}
+                type="password"
+                value={password}
+                onChange={e => { setPassword(e.target.value); setError('') }}
+                placeholder="Digite a senha..."
+                style={{ ...inputBase, border: `1px solid ${error ? '#ef444460' : C.border}` }}
+                maxLength={128}
+              />
+              {error && (
+                <div style={{ marginTop: 6, fontSize: 12, color: '#f87171', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <AlertTriangle size={11} /> {error}
+                </div>
+              )}
+            </div>
+
+            <button type="submit" disabled={loading || !password} style={{
+              width: '100%', padding: '11px 0', borderRadius: 9, cursor: loading || !password ? 'not-allowed' : 'pointer',
+              background: loading || !password ? 'rgba(99,102,241,0.3)' : `linear-gradient(135deg, ${server.color}cc, ${server.color})`,
+              border: 'none', color: '#fff', fontSize: 14, fontWeight: 600,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, transition: 'all .15s',
+              marginBottom: 10,
+            }}>
+              {loading ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Verificando...</> : <><LockOpen size={15} /> Entrar</>}
+            </button>
+
+            <button type="button" onClick={onBack} style={{
+              width: '100%', background: 'transparent', border: 'none', cursor: 'pointer',
+              color: C.textMuted, fontSize: 12, padding: '6px 0',
+            }}>
+              ← Voltar à seleção de servidor
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── ServerSelectScreen ────────────────────────────────────────────────────────
+function ServerSelectScreen({ onSelect, servers: serverList, envConfigs }) {
+  const list = serverList || SERVERS
+  const [hov, setHov] = useState(null)
+  const cols = list.length <= 4 ? '1fr 1fr' : '1fr 1fr 1fr'
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
+      <BackgroundImage />
+      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: list.length > 4 ? 680 : 520, padding: '0 20px' }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <img src={`${BASE}files/logo.webp`} alt="Rubinot" style={{ width: 100, height: 100, objectFit: 'contain', display: 'block', margin: '0 auto 14px', filter: 'drop-shadow(0 0 20px rgba(99,102,241,0.55))' }} onError={e => { e.target.style.display = 'none' }} />
           <h2 style={{ fontFamily: 'Cinzel, serif', color: C.text, fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Selecionar Servidor</h2>
           <p style={{ color: C.textMuted, fontSize: 13 }}>Escolha qual servidor deseja gerenciar nesta sessão</p>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          {SERVERS.map(s => (
-            <button
-              key={s.id}
-              onClick={() => onSelect(s.id)}
-              onMouseEnter={() => setHov(s.id)}
-              onMouseLeave={() => setHov(null)}
-              style={{
-                background: hov === s.id
-                  ? `linear-gradient(135deg, ${s.color}28, ${s.color}14)`
-                  : `linear-gradient(135deg, ${s.color}14, ${s.color}07)`,
-                border: `1px solid ${hov === s.id ? s.color + '70' : s.color + '35'}`,
-                borderRadius: 14, padding: '22px 16px',
-                cursor: 'pointer', transition: 'all .2s',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
-                transform: hov === s.id ? 'translateY(-3px)' : 'none',
-                boxShadow: hov === s.id ? `0 10px 28px ${s.color}22` : 'none',
-              }}
-            >
-              <div style={{
-                width: 52, height: 52, borderRadius: 13,
-                background: `${s.color}1a`, border: `1px solid ${s.color}45`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 17, fontWeight: 800, color: s.color, fontFamily: 'Cinzel, serif',
-              }}>
-                {s.roman}
-              </div>
-              <span style={{ fontFamily: 'Cinzel, serif', fontWeight: 700, color: C.text, fontSize: 15 }}>{s.name}</span>
-            </button>
-          ))}
+        <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 14 }}>
+          {list.map(s => {
+            const cfg     = envConfigs?.[s.id] || {}
+            const locked  = cfg.locked && cfg.hasPassword
+            const label   = cfg.customName || s.name
+            const initial = s.roman || label.slice(0, 2).toUpperCase()
+            return (
+              <button
+                key={s.id}
+                onClick={() => onSelect(s.id)}
+                onMouseEnter={() => setHov(s.id)}
+                onMouseLeave={() => setHov(null)}
+                style={{
+                  background: hov === s.id
+                    ? `linear-gradient(135deg, ${s.color}28, ${s.color}14)`
+                    : `linear-gradient(135deg, ${s.color}14, ${s.color}07)`,
+                  border: `1px solid ${hov === s.id ? s.color + '70' : s.color + '35'}`,
+                  borderRadius: 14, padding: '22px 16px',
+                  cursor: 'pointer', transition: 'all .2s', position: 'relative',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10,
+                  transform: hov === s.id ? 'translateY(-3px)' : 'none',
+                  boxShadow: hov === s.id ? `0 10px 28px ${s.color}22` : 'none',
+                }}
+              >
+                {locked && (
+                  <div style={{
+                    position: 'absolute', top: 8, right: 8,
+                    background: 'rgba(0,0,0,0.5)', borderRadius: 6, padding: '3px 5px',
+                    display: 'flex', alignItems: 'center',
+                  }}>
+                    <Lock size={11} color={s.color} />
+                  </div>
+                )}
+                <div style={{
+                  width: 52, height: 52, borderRadius: 13,
+                  background: `${s.color}1a`, border: `1px solid ${s.color}45`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 17, fontWeight: 800, color: s.color, fontFamily: 'Cinzel, serif',
+                }}>
+                  {initial}
+                </div>
+                <span style={{ fontFamily: 'Cinzel, serif', fontWeight: 700, color: C.text, fontSize: 15 }}>{label}</span>
+              </button>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -4574,9 +5149,35 @@ function LoginScreen({ onLogin, justApproved }) {
 }
 
 function AuthGate() {
-  const [status, setStatus]           = useState('checking')
+  const [status, setStatus]             = useState('checking')
   const [justApproved, setJustApproved] = useState(false)
-  const wasAwaitingRef                = useRef(false)
+  const [servers, setServers]           = useState(SERVERS)
+  const [envConfigs, setEnvConfigs]     = useState({})
+  const [meInfo, setMeInfo]             = useState({ apelido: '', isAdmin: false })
+  const [pendingServer, setPendingServer] = useState(null)
+  const wasAwaitingRef                  = useRef(false)
+
+  const loadEnvData = useCallback(async () => {
+    try {
+      const [listR, cfgsR, meR] = await Promise.all([
+        apiFetch('/api/env/list'),
+        apiFetch('/api/env/configs'),
+        apiFetch('/api/auth/me'),
+      ])
+      if (listR.ok) {
+        const list = await listR.json()
+        if (Array.isArray(list) && list.length > 0) {
+          SERVERS = list.map(e => ({
+            ...e,
+            name: e.name,
+          }))
+          setServers([...SERVERS])
+        }
+      }
+      if (cfgsR.ok) setEnvConfigs(await cfgsR.json())
+      if (meR.ok)   setMeInfo(await meR.json())
+    } catch {}
+  }, [])
 
   const checkDevice = useCallback(async () => {
     const deviceToken = getDeviceToken()
@@ -4598,7 +5199,12 @@ function AuthGate() {
           return
         }
         const vr = await fetch(API + '/api/auth/verify', { headers: { 'x-auth-token': authToken } })
-        setStatus(vr.ok ? (getServer() ? 'ok' : 'server-select') : 'login')
+        if (vr.ok) {
+          await loadEnvData()
+          setStatus(getServer() ? 'ok' : 'server-select')
+        } else {
+          setStatus('login')
+        }
       } else if (ds === 'pending') {
         wasAwaitingRef.current = true
         setStatus('awaiting')
@@ -4613,7 +5219,7 @@ function AuthGate() {
     } catch {
       setStatus(getDeviceToken() ? 'awaiting' : 'request-access')
     }
-  }, [])
+  }, [loadEnvData])
 
   useEffect(() => { checkDevice() }, [checkDevice])
 
@@ -4636,8 +5242,34 @@ function AuthGate() {
     }
   }
 
-  const handleLogin = () => { persistDeviceToken(); setStatus(getServer() ? 'ok' : 'server-select') }
-  const handleSelectServer = id => { saveServer(id); setStatus('ok') }
+  const handleLogin = async () => {
+    persistDeviceToken()
+    await loadEnvData()
+    setStatus(getServer() ? 'ok' : 'server-select')
+  }
+
+  const handleSelectServer = id => {
+    const cfg = envConfigs[id] || {}
+    const locked = cfg.locked && cfg.hasPassword
+    const alreadyUnlocked = sessionStorage.getItem(`env_unlocked:${id}`)
+    if (locked && !alreadyUnlocked) {
+      setPendingServer(id)
+      setStatus('env-locked')
+    } else {
+      saveServer(id)
+      setStatus('ok')
+    }
+  }
+
+  const handleEnvUnlocked = () => {
+    saveServer(pendingServer)
+    setPendingServer(null)
+    setStatus('ok')
+  }
+
+  const handleUpdateEnv = async () => {
+    await loadEnvData()
+  }
 
   if (status === 'checking') return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
@@ -4649,12 +5281,33 @@ function AuthGate() {
   if (status === 'awaiting') return <DeviceAwaitingScreen onRetry={checkDevice} />
   if (status === 'denied') return <DeviceDeniedScreen />
   if (status === 'login') return <LoginScreen onLogin={handleLogin} justApproved={justApproved} />
-  if (status === 'server-select') return <ServerSelectScreen onSelect={handleSelectServer} />
-  return <App key={getServer()} onChangeServer={() => setStatus('server-select')} />
+  if (status === 'env-locked') {
+    const sv = servers.find(s => s.id === pendingServer) || { id: pendingServer, name: pendingServer, color: C.primaryLight }
+    const cfg = envConfigs[pendingServer] || {}
+    const displaySv = { ...sv, name: cfg.customName || sv.name }
+    return <EnvPasswordScreen server={displaySv} onSuccess={handleEnvUnlocked} onBack={() => setStatus('server-select')} />
+  }
+  if (status === 'server-select') return (
+    <ServerSelectScreen
+      onSelect={handleSelectServer}
+      servers={servers}
+      envConfigs={envConfigs}
+    />
+  )
+  return (
+    <App
+      key={getServer()}
+      onChangeServer={() => setStatus('server-select')}
+      servers={servers}
+      envConfigs={envConfigs}
+      meInfo={meInfo}
+      onUpdateEnv={handleUpdateEnv}
+    />
+  )
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
-function App({ onChangeServer }) {
+function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdateEnv }) {
   const [tab, setTab]                   = useState('cadastro')
   const [tutores, setTutores]           = useState([])
   const [dataLoaded, setDataLoaded]     = useState(false)
@@ -4738,7 +5391,7 @@ function App({ onChangeServer }) {
     <div style={{ minHeight: '100vh', background: 'transparent', position: 'relative', zIndex: 1 }}>
       <BackgroundImage />
       <div style={{ position: 'relative', zIndex: 1 }}>
-        <Header tab={tab} setTab={setTab} tutores={tutores} onOpenSettings={() => openSettings('config')} onOpenSettingsDevices={() => openSettings('devices')} onChangeServer={onChangeServer} />
+        <Header tab={tab} setTab={setTab} tutores={tutores} servers={serversProp} onOpenSettings={() => openSettings('config')} onOpenSettingsDevices={() => openSettings('devices')} onChangeServer={onChangeServer} />
         <main key={tab} className="tab-enter" style={{ paddingBottom: 60 }}>
           {!dataLoaded ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 16 }}>
@@ -4758,6 +5411,10 @@ function App({ onChangeServer }) {
         onClose={() => setSettingsOpen(false)}
         onSave={handleSaveSettings}
         initialTab={settingsTab}
+        servers={serversProp || SERVERS}
+        envConfigs={envConfigs || {}}
+        meInfo={meInfo || { apelido: '', isAdmin: false }}
+        onUpdateEnv={onUpdateEnv}
       />
       <FloatingChat tutores={tutores} setTutores={setTutores} apiKey={apiKey} />
     </div>
