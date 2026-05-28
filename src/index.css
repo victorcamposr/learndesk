@@ -69,3 +69,6 @@ select option {
   50%       { box-shadow: 0 0 0 6px transparent; }
 }
 .pulse-color { animation: pulse-ring-color 2s ease-in-out infinite; }
+
+button:not(:disabled):hover { filter: brightness(1.18); }
+button:not(:disabled) { transition: filter .15s; }

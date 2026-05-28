@@ -455,6 +455,24 @@ REGRAS CRÍTICAS — LEIA COM ATENÇÃO:
     let text = result.response.text().trim()
     if (text.startsWith('```')) text = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
     const parsed = JSON.parse(text)
+
+    // Server-side dedup guard: remove add_presenca if date already exists
+    if (Array.isArray(parsed.acoes)) {
+      const tutorMap = {}
+      for (const t of tutores) tutorMap[t.nick?.toLowerCase()] = t
+      parsed.acoes = parsed.acoes.filter(a => {
+        if (a.tipo !== 'add_presenca') return true
+        const t = tutorMap[a.nick?.toLowerCase()]
+        if (!t) return true
+        const already = (t.presencas || []).includes(a.data)
+        if (already) {
+          if (!parsed._avisos) parsed._avisos = []
+          parsed._avisos.push(`${a.nick} já tem presença em ${a.data}`)
+        }
+        return !already
+      })
+    }
+
     res.json(parsed)
   } catch (err) {
     res.status(500).json({ error: err?.message || 'Erro desconhecido' })

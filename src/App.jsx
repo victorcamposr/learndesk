@@ -67,8 +67,12 @@ const DENIED_AT_KEY = 'rubinot_denied_at'
 const getToken       = () => localStorage.getItem(TOKEN_KEY)
 const getServer      = () => localStorage.getItem(SERVER_KEY)
 const saveServer     = s => localStorage.setItem(SERVER_KEY, s)
-const getDeviceToken = () => localStorage.getItem(DEVICE_KEY)
-const saveDeviceToken = t => localStorage.setItem(DEVICE_KEY, t)
+const getDeviceToken  = () => localStorage.getItem(DEVICE_KEY) || sessionStorage.getItem(DEVICE_KEY)
+const saveDeviceToken = t => sessionStorage.setItem(DEVICE_KEY, t)
+const persistDeviceToken = () => {
+  const t = sessionStorage.getItem(DEVICE_KEY)
+  if (t) { localStorage.setItem(DEVICE_KEY, t); sessionStorage.removeItem(DEVICE_KEY) }
+}
 
 function genDeviceToken() {
   const arr = new Uint8Array(32)
@@ -585,8 +589,9 @@ function HoverTooltip({ content, children, width = 280, side = 'top' }) {
 
 // ── ObsModal ──────────────────────────────────────────────────────────────────
 function ObsModal({ tutor, open, onClose, onSave }) {
-  const [text, setText] = useState('')
-  useEffect(() => { if (open) setText(tutor?.obs || '') }, [open, tutor])
+  const [text, setText]               = useState('')
+  const [confirmRemove, setConfirmRemove] = useState(false)
+  useEffect(() => { if (open) { setText(tutor?.obs || ''); setConfirmRemove(false) } }, [open, tutor])
 
   return (
     <Modal open={open} onClose={onClose} title={`Observação — ${tutor?.nick}`} icon={StickyNote} maxWidth={480}>
@@ -599,15 +604,26 @@ function ObsModal({ tutor, open, onClose, onSave }) {
           placeholder="Digite a observação aqui..."
         />
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          {tutor?.obs && (
-            <button style={btn('danger', 'sm')} onClick={() => { onSave(''); onClose() }}>
+          {tutor?.obs && !confirmRemove && (
+            <button style={btn('danger', 'sm')} onClick={() => setConfirmRemove(true)}>
               <Trash2 size={13} /> Remover
             </button>
           )}
-          <button style={btn('ghost')} onClick={onClose}><X size={14} /> Cancelar</button>
-          <button style={btn('gold')} onClick={() => { onSave(text.trim()); onClose() }}>
-            <Save size={14} /> Salvar
-          </button>
+          {confirmRemove && (
+            <>
+              <span style={{ fontSize: 12, color: '#f87171', alignSelf: 'center' }}>Remover observação?</span>
+              <button style={{ ...btn('danger', 'sm') }} onClick={() => { onSave(''); onClose() }}><Check size={13} /> Sim</button>
+              <button style={btn('ghost', 'sm')} onClick={() => setConfirmRemove(false)}><X size={13} /> Não</button>
+            </>
+          )}
+          {!confirmRemove && (
+            <>
+              <button style={btn('ghost')} onClick={onClose}><X size={14} /> Cancelar</button>
+              <button style={btn('gold')} onClick={() => { onSave(text.trim()); onClose() }}>
+                <Save size={14} /> Salvar
+              </button>
+            </>
+          )}
         </div>
       </div>
     </Modal>
@@ -616,12 +632,13 @@ function ObsModal({ tutor, open, onClose, onSave }) {
 
 // ── AusenciaModal ─────────────────────────────────────────────────────────────
 function AusenciaModal({ tutor, open, onClose, onSave }) {
-  const [motivo, setMotivo]       = useState('')
-  const [dataInicio, setDataInicio] = useState(todayStr())
-  const [dataFim, setDataFim]     = useState('')
-  const [errors, setErrors]       = useState({})
+  const [motivo, setMotivo]           = useState('')
+  const [dataInicio, setDataInicio]   = useState(todayStr())
+  const [dataFim, setDataFim]         = useState('')
+  const [errors, setErrors]           = useState({})
+  const [confirmRemoveId, setConfirmRemoveId] = useState(null)
 
-  const reset = () => { setMotivo(''); setDataInicio(todayStr()); setDataFim(''); setErrors({}) }
+  const reset = () => { setMotivo(''); setDataInicio(todayStr()); setDataFim(''); setErrors({}); setConfirmRemoveId(null) }
   useEffect(() => { if (open) reset() }, [open])
 
   const handleAdd = () => {
@@ -657,13 +674,21 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{a.motivo}</div>
                   <div style={{ fontSize: 11, color: C.textSoft, marginTop: 2 }}>
-                    {a.dataInicio} → {a.dataFim}
+                    {formatDate(a.dataInicio)} → {formatDate(a.dataFim)}
                     {' · '}
                     <span style={{ color: '#f97316' }}>{diasRestantes(a.dataFim)}</span>
                   </div>
                 </div>
-                <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 4, display: 'flex' }}
-                  onClick={() => onSave(null, a.id)}><X size={16} /></button>
+                {confirmRemoveId === a.id ? (
+                  <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, color: '#f87171' }}>Remover?</span>
+                    <button style={{ ...btn('danger', 'sm'), padding: '3px 10px' }} onClick={() => { onSave(null, a.id); setConfirmRemoveId(null) }}>Sim</button>
+                    <button style={{ ...btn('ghost', 'sm'), padding: '3px 8px' }} onClick={() => setConfirmRemoveId(null)}>Não</button>
+                  </div>
+                ) : (
+                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 4, display: 'flex' }}
+                    onClick={() => setConfirmRemoveId(a.id)}><X size={16} /></button>
+                )}
               </div>
             ))}
           </div>
@@ -683,10 +708,18 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
                 display: 'flex', alignItems: 'center', gap: 10, opacity: .55,
               }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, color: C.textSoft }}>{a.motivo} · {a.dataInicio} → {a.dataFim}</div>
+                  <div style={{ fontSize: 12, color: C.textSoft }}>{a.motivo} · {formatDate(a.dataInicio)} → {formatDate(a.dataFim)}</div>
                 </div>
-                <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex' }}
-                  onClick={() => onSave(null, a.id)}><X size={14} /></button>
+                {confirmRemoveId === a.id ? (
+                  <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                    <span style={{ fontSize: 11, color: '#f87171' }}>Remover?</span>
+                    <button style={{ ...btn('danger', 'sm'), padding: '3px 10px' }} onClick={() => { onSave(null, a.id); setConfirmRemoveId(null) }}>Sim</button>
+                    <button style={{ ...btn('ghost', 'sm'), padding: '3px 8px' }} onClick={() => setConfirmRemoveId(null)}>Não</button>
+                  </div>
+                ) : (
+                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex' }}
+                    onClick={() => setConfirmRemoveId(a.id)}><X size={14} /></button>
+                )}
               </div>
             ))}
           </div>
@@ -996,7 +1029,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
               fontSize: 11, fontWeight: 700, padding: '3px 9px',
               display: 'inline-flex', alignItems: 'center', gap: 5,
             }}>
-              <Palmtree size={10} /> Ausente até {ausenciasAtivas[0].dataFim}
+              <Palmtree size={10} /> Ausente até {formatDate(ausenciasAtivas[0].dataFim)}
             </span>
           )}
 
@@ -1082,7 +1115,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
             </button>
           </HoverTooltip>
 
-          <HoverTooltip content={<span style={{ fontSize: 12, color: C.text }}>{emAusencia ? `Ausente até ${ausenciasAtivas[0].dataFim}` : 'Gerenciar ausências'}</span>} width={200}>
+          <HoverTooltip content={<span style={{ fontSize: 12, color: C.text }}>{emAusencia ? `Ausente até ${formatDate(ausenciasAtivas[0].dataFim)}` : 'Gerenciar ausências'}</span>} width={200}>
             <button style={{
               ...btn('subtle', 'sm'),
               color: emAusencia ? '#c4b5fd' : C.textMuted,
@@ -1367,7 +1400,7 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
 
         <HoverTooltip width={200} side="top" content={
           <span style={{ fontSize: 12, color: C.text }}>
-            {emAusencia ? `Ausente até ${ausenciasAtivas[0].dataFim}` : 'Gerenciar ausências'}
+            {emAusencia ? `Ausente até ${formatDate(ausenciasAtivas[0].dataFim)}` : 'Gerenciar ausências'}
           </span>
         }>
           <button style={{
@@ -3080,7 +3113,7 @@ function DashboardRow({ t }) {
       <td style={{ padding: '10px 12px' }}>
         {emAusencia
           ? <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#c4b5fd', fontSize: 12 }}>
-              <Palmtree size={12} /> retorno {ausenciasAtivas[0].dataFim}
+              <Palmtree size={12} /> retorno {formatDate(ausenciasAtivas[0].dataFim)}
             </span>
           : <span style={{ color: '#34d399', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
               <UserCheck size={12} /> ativo
@@ -3492,7 +3525,7 @@ function TutorProfileModal({ tutor, open, onClose }) {
               <Badge label={atividade}    colorMap={ATIVIDADE_COLORS} />
               {emAusencia && (
                 <span style={{ background: 'rgba(139,92,246,0.14)', border: '1px solid rgba(139,92,246,0.4)', borderRadius: 6, color: '#c4b5fd', fontSize: 11, fontWeight: 700, padding: '3px 9px', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                  <Palmtree size={10} /> Ausente até {ausenciasAtivas[0].dataFim}
+                  <Palmtree size={10} /> Ausente até {formatDate(ausenciasAtivas[0].dataFim)}
                 </span>
               )}
               {diasAlerta !== null && (
@@ -4555,7 +4588,7 @@ function AuthGate() {
     }
   }
 
-  const handleLogin = () => setStatus(getServer() ? 'ok' : 'server-select')
+  const handleLogin = () => { persistDeviceToken(); setStatus(getServer() ? 'ok' : 'server-select') }
   const handleSelectServer = id => { saveServer(id); setStatus('ok') }
 
   if (status === 'checking') return (
@@ -4625,15 +4658,33 @@ function App({ onChangeServer }) {
   }, [dataLoaded])
 
   // Salva no servidor a cada mudança (debounced 600ms)
-  const saveTimer = useRef(null)
+  const saveTimer    = useRef(null)
+  const fromPollRef  = useRef(false)
   useEffect(() => {
     if (!dataLoaded) return
+    if (fromPollRef.current) { fromPollRef.current = false; return }
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       apiFetch('/api/tutores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tutores }) })
     }, 600)
     return () => clearTimeout(saveTimer.current)
   }, [tutores, dataLoaded])
+
+  // Polling dinâmico: atualiza tutores sem precisar recarregar a página
+  useEffect(() => {
+    if (!dataLoaded) return
+    const id = setInterval(async () => {
+      try {
+        const r = await apiFetch('/api/tutores')
+        if (!r.ok) return
+        const fresh = await r.json()
+        if (!Array.isArray(fresh)) return
+        fromPollRef.current = true
+        setTutores(fresh)
+      } catch {}
+    }, 30000)
+    return () => clearInterval(id)
+  }, [dataLoaded])
 
   return (
     <div style={{ minHeight: '100vh', background: 'transparent', position: 'relative', zIndex: 1 }}>
