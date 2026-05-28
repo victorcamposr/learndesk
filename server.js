@@ -486,8 +486,8 @@ app.post('/api/settings', requireAuth, (req, res) => {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings))
     return res.status(400).json({ error: 'Dados inválidos' })
   // Aceita apenas campos conhecidos para evitar prototype pollution
-  const { diasParaAlerta, baixaMax, moderadaMax } = settings
-  setKV(serverKey(req, 'settings'), { diasParaAlerta, baixaMax, moderadaMax })
+  const { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica } = settings
+  setKV(serverKey(req, 'settings'), { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica: atividadeAutomatica !== false })
   res.json({ ok: true })
 })
 

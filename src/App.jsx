@@ -55,7 +55,7 @@ const CARGOS     = ['Sênior', 'Tutor', 'Em Teste', 'Inativo', 'Desligado']
 const ATIVIDADES = ['Alta', 'Moderada', 'Baixa', 'Não Definida']
 const PERIODOS   = ['Manhã', 'Tarde', 'Noite']
 
-const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15 }
+const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15, atividadeAutomatica: true }
 
 let _cfg = { ...DEFAULT_CFG }
 
@@ -274,6 +274,7 @@ function calcAtividadeFromPresencas(presencas = [], dataInicio) {
 }
 
 function getAtividade(tutor) {
+  if (!_cfg.atividadeAutomatica) return tutor.atividade || 'Não Definida'
   return calcAtividadeFromPresencas(tutor.presencas, tutor.dataInicio)
 }
 
@@ -830,10 +831,16 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
         </div>
         <div>
           <label style={labelStyle}><Activity size={12} /> Atividade</label>
-          <div style={{ ...inputBase, display: 'flex', alignItems: 'center', gap: 10, cursor: 'default', opacity: 0.8 }}>
-            <Badge label={getAtividade(form)} colorMap={ATIVIDADE_COLORS} />
-            <span style={{ fontSize: 11, color: C.textMuted }}>calculada pelas presenças mensais</span>
-          </div>
+          {_cfg.atividadeAutomatica ? (
+            <div style={{ ...inputBase, display: 'flex', alignItems: 'center', gap: 10, cursor: 'default', opacity: 0.8 }}>
+              <Badge label={getAtividade(form)} colorMap={ATIVIDADE_COLORS} />
+              <span style={{ fontSize: 11, color: C.textMuted }}>calculada pelas presenças mensais</span>
+            </div>
+          ) : (
+            <select style={inp('atividade')} value={form.atividade} onChange={e => set('atividade', e.target.value)}>
+              {ATIVIDADES.map(a => <option key={a}>{a}</option>)}
+            </select>
+          )}
         </div>
         <div>
           <label style={labelStyle}><Calendar size={12} /> Data Início</label>
@@ -1853,10 +1860,10 @@ function CadastroTab({ tutores, setTutores }) {
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr) 1.4fr', gap: 12, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: _cfg.atividadeAutomatica ? 'repeat(5, 1fr) 1.4fr' : 'repeat(4, 1fr) 1.4fr', gap: 12, marginBottom: 24 }}>
         <StatPill icon={Users}         label="Total"           value={stats.total}         color={C.gold} />
         <StatPill icon={UserCheck}     label="Ativos"          value={stats.ativos}        color="#10b981" sub="Tutor + Em Teste" />
-        <StatPill icon={CalendarCheck} label="Presenças Hoje"  value={stats.presencasHoje} color={C.teal} sub={`de ${stats.ativos} ativos`} />
+        {_cfg.atividadeAutomatica && <StatPill icon={CalendarCheck} label="Presenças Hoje"  value={stats.presencasHoje} color={C.teal} sub={`de ${stats.ativos} ativos`} />}
         <StatPill icon={Palmtree}      label="Em Ausência"     value={stats.ausentes}      color="#8b5cf6" />
         <StatPill icon={AlertTriangle} label="Atenção"         value={stats.alertas}       color="#f97316" sub="baixa atividade" />
         <AtividadeBar tutores={tutores} />
@@ -2908,8 +2915,8 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey }) {
         <SummaryCard label="Mediana Tempo de Casa" value={mediaMeses ? `${mediaMeses.mediana}m` : '—'} color="#3b82f6" icon={Clock} sub={mediaMeses ? `média: ${mediaMeses.media}m` : 'entre ativos'} />
       </div>
 
-      {/* Presenças hoje */}
-      <div style={{ ...cardStyle, marginBottom: 28 }}>
+      {/* Presenças hoje — só com atividade automática */}
+      {_cfg.atividadeAutomatica && <div style={{ ...cardStyle, marginBottom: 28 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
           <div style={{ width: 28, height: 28, borderRadius: 7, background: `${C.teal}18`, border: `1px solid ${C.teal}30`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <CalendarCheck size={13} color={C.teal} />
@@ -2972,10 +2979,10 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey }) {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
 
-      {/* Histórico de presenças */}
-      <PresencaHistoricoChart tutores={tutores} />
+      {/* Histórico de presenças — só com atividade automática */}
+      {_cfg.atividadeAutomatica && <PresencaHistoricoChart tutores={tutores} />}
 
       {/* Charts */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 28 }}>
@@ -2995,7 +3002,7 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey }) {
             ),
           },
           {
-            title: 'Distribuição por Atividade', Icon: Activity,
+            title: 'Distribuição por Atividade', Icon: Activity, hidden: !_cfg.atividadeAutomatica,
             content: (
               <ResponsiveContainer width="100%" height={230}>
                 <BarChart data={atividadeData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
@@ -3040,7 +3047,7 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey }) {
               </ResponsiveContainer>
             ),
           },
-        ].map(({ title, Icon, content }) => (
+        ].filter(c => !c.hidden).map(({ title, Icon, content }) => (
           <div key={title} style={{ ...cardStyle }}>
             {chartTitle(title, Icon)}
             {content}
@@ -3334,6 +3341,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config' }) {
   useEffect(() => { if (open) { setForm({ ..._cfg }); setTab(initialTab) } }, [open, initialTab])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: Number(v) }))
+  const setBool = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const valid = form.baixaMax >= 1 && form.moderadaMax > form.baixaMax && form.diasParaAlerta >= 1
 
   const preview = [
@@ -3377,8 +3385,40 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config' }) {
       {tab === 'devices' ? <DevicesPanel /> : (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
-        {/* Regras de atividade */}
-        <div>
+        {/* Toggle atividade automática */}
+        <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Activity size={13} color={form.atividadeAutomatica ? C.teal : C.textMuted} />
+                Atividade Automática
+              </div>
+              <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
+                {form.atividadeAutomatica
+                  ? 'Calculada automaticamente pelas presenças mensais'
+                  : 'Definida manualmente em cada tutor'}
+              </div>
+            </div>
+            <button
+              onClick={() => setBool('atividadeAutomatica', !form.atividadeAutomatica)}
+              style={{
+                width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+                background: form.atividadeAutomatica ? C.teal : 'rgba(255,255,255,0.12)',
+                position: 'relative', flexShrink: 0, transition: 'background .2s',
+                boxShadow: form.atividadeAutomatica ? `0 0 10px ${C.teal}60` : 'none',
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 3, left: form.atividadeAutomatica ? 23 : 3,
+                width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                transition: 'left .2s', boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+              }} />
+            </button>
+          </div>
+        </div>
+
+        {/* Regras de atividade (só visível quando automático) */}
+        {form.atividadeAutomatica && <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Activity size={12} /> Regras de Atividade (por mês)
           </div>
@@ -3405,7 +3445,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config' }) {
               </div>
             )}
           </div>
-        </div>
+        </div>}
 
         {/* Alertas */}
         <div>
@@ -3728,6 +3768,24 @@ function Header({ tab, setTab, tutores, onOpenSettings, onOpenSettingsDevices, o
           })()}
         </div>
 
+        {/* Configurações */}
+        <button
+          onClick={onOpenSettings}
+          onMouseEnter={() => setHovered('settings')}
+          onMouseLeave={() => setHovered(null)}
+          title="Configurações"
+          style={{
+            background: hovered === 'settings' ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${hovered === 'settings' ? C.borderLight : C.border}`,
+            borderRadius: 10, cursor: 'pointer',
+            color: hovered === 'settings' ? C.textSoft : C.textMuted,
+            padding: '8px 10px', display: 'flex', alignItems: 'center',
+            transition: 'all .18s',
+          }}
+        >
+          <Settings size={16} />
+        </button>
+
         {/* Sino de notificações */}
         <div style={{ position: 'relative' }}>
           <button
@@ -3897,21 +3955,11 @@ function Header({ tab, setTab, tutores, onOpenSettings, onOpenSettingsDevices, o
                 )}
 
                 {/* Rodapé */}
-                <div style={{ padding: '8px 16px', borderTop: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ padding: '8px 16px', borderTop: `1px solid ${C.border}`, display: 'flex', alignItems: 'center' }}>
                   <span style={{ fontSize: 10, color: C.textMuted, display: 'flex', alignItems: 'center', gap: 5 }}>
                     <AlertTriangle size={10} color="#f97316" />
                     Alerta após {_cfg.diasParaAlerta}d sem presença
                   </span>
-                  <button onClick={e => { e.stopPropagation(); onOpenSettings() }} style={{
-                    background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px',
-                    color: C.textMuted, display: 'flex', alignItems: 'center', gap: 4,
-                    fontSize: 10, transition: 'color .15s',
-                  }}
-                    onMouseEnter={e => e.currentTarget.style.color = C.textSoft}
-                    onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
-                  >
-                    <Settings size={11} /> Configurações
-                  </button>
                 </div>
               </div>
               {/* Seta */}
