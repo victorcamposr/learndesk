@@ -17,8 +17,13 @@ import {
   Flame, Zap, Star, Gem,
 } from 'lucide-react'
 
-const SERVER_ICON_MAP = { globe: Globe, swords: Swords, shield: Shield, crown: Crown, flame: Flame, zap: Zap, star: Star, gem: Gem, sparkles: Sparkles, moon: Moon }
-const SERVER_ICON_LIST = ['globe','swords','shield','crown','flame','zap','star','gem','sparkles','moon']
+const mkRoman = r => ({ size = 16, color = 'currentColor' }) => (
+  <span style={{ fontSize: Math.round(size * 0.8), fontWeight: 900, color, fontFamily: 'Georgia, serif', lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{r}</span>
+)
+const RomanI = mkRoman('I'), RomanII = mkRoman('II'), RomanIII = mkRoman('III'), RomanIV = mkRoman('IV'), RomanV = mkRoman('V')
+
+const SERVER_ICON_MAP = { globe: Globe, swords: Swords, shield: Shield, crown: Crown, flame: Flame, zap: Zap, star: Star, gem: Gem, sparkles: Sparkles, moon: Moon, roman1: RomanI, roman2: RomanII, roman3: RomanIII, roman4: RomanIV, roman5: RomanV }
+const SERVER_ICON_LIST = ['globe','swords','shield','crown','flame','zap','star','gem','sparkles','moon','roman1','roman2','roman3','roman4','roman5']
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
@@ -3444,34 +3449,58 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const [loading, setLoading]               = useState(false)
   const [search, setSearch]                 = useState('')
   const [statusFilter, setStatusFilter]     = useState('all')
+  const [toast, setToast]                   = useState(null)
+  const prevPendingRef                      = useRef(-1)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const showToast = (msg, color = '#10b981') => setToast({ msg, color })
+
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const [rDev, rAdm, rPerm] = await Promise.all([
         apiFetch('/api/auth/devices'),
         apiFetch('/api/admin/apelidos'),
         apiFetch('/api/auth/devices/permissions'),
       ])
-      if (rDev.ok)  setDevices(await rDev.json())
+      if (rDev.ok) {
+        const list = await rDev.json()
+        const pendingNow = list.filter(d => d.status === 'pending').length
+        if (prevPendingRef.current >= 0 && pendingNow > prevPendingRef.current) {
+          const diff = pendingNow - prevPendingRef.current
+          showToast(`${diff} nova${diff > 1 ? 's' : ''} solicitação${diff > 1 ? 'ões' : ''} de acesso`, C.gold)
+        }
+        prevPendingRef.current = pendingNow
+        setDevices(list)
+      }
       if (rAdm.ok)  setAdminAp((await rAdm.json()).apelidos || [])
       if (rPerm.ok) setPerms(await rPerm.json())
-    } finally { setLoading(false) }
+    } finally { if (!silent) setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    const id = setInterval(() => load(true), 12000)
+    return () => clearInterval(id)
+  }, [load])
+
   const act = async (url, token) => {
     await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
+    if (url.includes('approve')) showToast('Dispositivo aprovado')
+    else if (url.includes('deny')) showToast('Acesso negado', '#ef4444')
+    else if (url.includes('delete')) showToast('Dispositivo excluído', '#ef4444')
     load()
   }
 
   const toggleAdmin = async (apelido, isAdmin) => {
-    const updated = isAdmin ? adminApelidos.filter(a => a !== apelido) : [...adminApelidos, apelido]
+    const updated = isAdmin
+      ? adminApelidos.filter(a => a.toLowerCase() !== apelido.toLowerCase())
+      : [...adminApelidos, apelido]
     await apiFetch('/api/admin/apelidos', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apelidos: updated }),
     })
+    showToast(isAdmin ? `${apelido} removido do grupo admin` : `${apelido} promovido a admin`)
     load()
   }
 
@@ -3480,6 +3509,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: 'senior', allowedServers: allowedServers.length > 0 ? allowedServers : null }),
     })
+    showToast('Permissões salvas')
     load()
   }
 
@@ -3495,6 +3525,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
 
   return (
     <div>
+      {toast && <Toast message={toast.msg} color={toast.color} onClose={() => setToast(null)} />}
       <div style={{ position: 'relative', marginBottom: 8 }}>
         <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: C.textMuted, pointerEvents: 'none' }} />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filtrar por apelido, navegador ou sistema…"
@@ -3719,7 +3750,7 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true, me
     setPassword2('')
   }, [serverId, cfg.customName, cfg.locked, srv.name])
 
-  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500) }
+  const showToast = msg => setToast(msg)
 
   const handleSaveMaster = async () => {
     if (masterPwd.length < 6) { showToast('Mínimo 6 caracteres'); return }
@@ -3757,11 +3788,7 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true, me
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {toast && (
-        <div style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid #10b98140', borderRadius: 8, padding: '8px 14px', fontSize: 12, color: C.teal }}>
-          {toast}
-        </div>
-      )}
+      {toast && <Toast message={toast} onClose={() => setToast('')} />}
 
       {/* Nome do ambiente — apenas para admins/full */}
       {canRename && (
@@ -3886,7 +3913,7 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
   const [editColor, setEditColor] = useState('')
   const [editIcon, setEditIcon]   = useState('globe')
 
-  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500) }
+  const showToast = msg => setToast(msg)
 
   const genId = name => {
     const base = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 28)
@@ -3952,11 +3979,7 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {toast && (
-        <div style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid #10b98140', borderRadius: 8, padding: '8px 14px', fontSize: 12, color: C.teal }}>
-          {toast}
-        </div>
-      )}
+      {toast && <Toast message={toast} onClose={() => setToast('')} />}
 
       <div style={{ fontSize: 11, color: C.textMuted }}>
         Ambientes disponíveis. Os 4 padrões (Grimoria I–IV) aparecem enquanto nenhuma lista customizada for salva.
@@ -4474,7 +4497,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
       } catch {}
     }
     check()
-    const id = setInterval(check, 30000)
+    const id = setInterval(check, 12000)
     return () => clearInterval(id)
   }, [])
 

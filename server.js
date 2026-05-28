@@ -62,10 +62,7 @@ const DEFAULT_ENV_LIST = [
 const getEnvList      = () => getKV('env_list') || DEFAULT_ENV_LIST
 const getValidServers = () => getEnvList().map(e => e.id)
 
-const getAdminApelidos = () => {
-  const saved = getKV('admin_apelidos') || []
-  return saved.some(a => a.toLowerCase() === 'campin') ? saved : ['campin', ...saved]
-}
+const getAdminApelidos = () => getKV('admin_apelidos') || []
 const getDevicePerms   = () => getKV('device_permissions') || {}
 const setDevicePerms   = p  => setKV('device_permissions', p)
 const getDeviceApelido = req => {
@@ -677,6 +674,10 @@ app.post('/api/admin/master-password', requireAuth, requireAdmin, (req, res) => 
     return res.status(400).json({ error: 'Senha inválida (mín. 6 chars)' })
   setKV('master_password_hash', hashPwd(password))
   res.json({ ok: true })
+})
+
+app.get('/api/admin/apelidos', requireAuth, requireAdmin, (_req, res) => {
+  res.json({ apelidos: getAdminApelidos() })
 })
 
 app.post('/api/admin/apelidos', requireAuth, requireAdmin, (req, res) => {
