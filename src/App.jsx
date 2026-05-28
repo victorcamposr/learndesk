@@ -150,7 +150,8 @@ const SERVERS = [
   { id: 'grimoria-4', name: 'Grimoria IV',  roman: 'IV',  color: '#ec4899' },
 ]
 
-const API = import.meta.env.VITE_API_URL || ''
+const API  = import.meta.env.VITE_API_URL || ''
+const BASE = import.meta.env.BASE_URL
 
 function apiFetch(url, opts = {}) {
   const token  = getToken()
@@ -346,7 +347,7 @@ function BackgroundImage() {
       {/* Imagem base com filtro e opacidade baixa */}
       <div style={{
         position: 'absolute', inset: 0,
-        backgroundImage: 'url(/files/bg.webp)',
+        backgroundImage: `url(${BASE}files/bg.webp)`,
         backgroundSize: 'cover',
         backgroundPosition: 'center 28%',
         opacity: 0.11,
@@ -3588,7 +3589,7 @@ function Header({ tab, setTab, tutores, onOpenSettings, onChangeServer }) {
     }}>
       <div style={{ maxWidth: 1220, margin: '0 auto', padding: '0 28px', display: 'flex', alignItems: 'center', gap: 20, height: 72 }}>
         <img
-          src="/files/logo.webp" alt="Rubinot"
+          src={`${BASE}files/logo.webp`} alt="Rubinot"
           style={{ width: 100, height: 100, objectFit: 'contain', flexShrink: 0 }}
           onError={e => { e.target.style.display = 'none' }}
         />
@@ -4031,7 +4032,7 @@ function ServerSelectScreen({ onSelect }) {
       <BackgroundImage />
       <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 520, padding: '0 20px' }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <img src="/files/logo.webp" alt="Rubinot" style={{ width: 100, height: 100, objectFit: 'contain', display: 'block', margin: '0 auto 14px', filter: 'drop-shadow(0 0 20px rgba(99,102,241,0.55))' }} onError={e => { e.target.style.display = 'none' }} />
+          <img src={`${BASE}files/logo.webp`} alt="Rubinot" style={{ width: 100, height: 100, objectFit: 'contain', display: 'block', margin: '0 auto 14px', filter: 'drop-shadow(0 0 20px rgba(99,102,241,0.55))' }} onError={e => { e.target.style.display = 'none' }} />
           <h2 style={{ fontFamily: 'Cinzel, serif', color: C.text, fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Selecionar Servidor</h2>
           <p style={{ color: C.textMuted, fontSize: 13 }}>Escolha qual servidor deseja gerenciar nesta sessão</p>
         </div>
@@ -4107,7 +4108,7 @@ function DeviceRequestScreen({ onRequest }) {
           boxShadow: '0 8px 48px rgba(0,0,0,0.6)',
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
-            <img src="/files/logo.webp" alt="Rubinot" style={{ width: 100, height: 100, objectFit: 'contain', marginBottom: 16, filter: 'drop-shadow(0 0 18px rgba(99,102,241,0.5))' }} />
+            <img src={`${BASE}files/logo.webp`} alt="Rubinot" style={{ width: 100, height: 100, objectFit: 'contain', marginBottom: 16, filter: 'drop-shadow(0 0 18px rgba(99,102,241,0.5))' }} />
             <div style={{ fontSize: 18, fontWeight: 700, color: C.text, fontFamily: 'Cinzel, serif', marginBottom: 6 }}>
               Acesso Restrito
             </div>
@@ -4268,7 +4269,7 @@ function LoginScreen({ onLogin }) {
           boxShadow: '0 8px 48px rgba(0,0,0,0.5)',
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
-            <img src="/files/logo.webp" alt="Rubinot" style={{ width: 150, height: 150, objectFit: 'contain', display: 'block', marginBottom: 12, filter: 'drop-shadow(0 0 18px rgba(99,102,241,0.5))' }} />
+            <img src={`${BASE}files/logo.webp`} alt="Rubinot" style={{ width: 150, height: 150, objectFit: 'contain', display: 'block', marginBottom: 12, filter: 'drop-shadow(0 0 18px rgba(99,102,241,0.5))' }} />
             <div style={{ fontSize: 13, color: C.textMuted, textAlign: 'center' }}>Painel Administrativo</div>
           </div>
 
