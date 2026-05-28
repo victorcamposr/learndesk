@@ -180,6 +180,7 @@ const loadAnalysesFor = req => {
 const saveAnalysesFor = (req, data) => writeFileSync(serverAnalysesFile(req), JSON.stringify(data, null, 2), 'utf8')
 
 const app = express()
+app.set('trust proxy', 1)
 app.use(helmet())
 app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173', 'https://victorcamposr.github.io', 'https://backendcampin.duckdns.org'] }))
 app.use(express.json({ limit: '1mb' }))
