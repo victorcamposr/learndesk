@@ -63,6 +63,8 @@ const getEnvList      = () => getKV('env_list') || DEFAULT_ENV_LIST
 const getValidServers = () => getEnvList().map(e => e.id)
 
 const getAdminApelidos = () => getKV('admin_apelidos') || ['campin']
+const getDevicePerms   = () => getKV('device_permissions') || {}
+const setDevicePerms   = p  => setKV('device_permissions', p)
 const getDeviceApelido = req => {
   const dt = req.headers['x-device-token']
   if (!dt || typeof dt !== 'string') return null
@@ -569,8 +571,12 @@ app.post('/api/analyze', requireAuth, async (req, res) => {
 
 // ── /api/auth/me ──────────────────────────────────────────────────────────────
 app.get('/api/auth/me', requireAuth, (req, res) => {
+  const dt      = req.headers['x-device-token']
   const apelido = getDeviceApelido(req) || ''
-  res.json({ apelido, isAdmin: getAdminApelidos().includes(apelido) })
+  const isAdmin = getAdminApelidos().includes(apelido)
+  const perm    = (dt && getDevicePerms()[dt]) || {}
+  const allowedServers = isAdmin ? null : (perm.allowedServers || null)
+  res.json({ apelido, isAdmin, role: perm.role || 'full', allowedServers })
 })
 
 // ── Env list ───────────────────────────────────────────────────────────────────
@@ -674,6 +680,24 @@ app.post('/api/admin/apelidos', requireAuth, requireAdmin, (req, res) => {
   if (!Array.isArray(apelidos) || apelidos.some(a => typeof a !== 'string' || a.length > 40))
     return res.status(400).json({ error: 'Dados inválidos' })
   setKV('admin_apelidos', apelidos.filter(a => a.trim()))
+  res.json({ ok: true })
+})
+
+// ── Device permissions ─────────────────────────────────────────────────────────
+app.get('/api/auth/devices/permissions', requireAuth, requireAdmin, (_req, res) => {
+  res.json(getDevicePerms())
+})
+
+app.post('/api/auth/devices/:token/permissions', requireAuth, requireAdmin, (req, res) => {
+  const { token } = req.params
+  if (!getDevices()[token]) return res.status(404).json({ error: 'Dispositivo não encontrado' })
+  const { role, allowedServers } = req.body || {}
+  const perms = getDevicePerms()
+  perms[token] = {
+    role: ['full', 'senior'].includes(role) ? role : 'full',
+    allowedServers: Array.isArray(allowedServers) && allowedServers.length > 0 ? allowedServers : null,
+  }
+  setDevicePerms(perms)
   res.json({ ok: true })
 })
 
