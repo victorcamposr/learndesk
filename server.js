@@ -337,6 +337,16 @@ app.post('/api/auth/devices/deny', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
+app.post('/api/auth/devices/delete', requireAuth, (req, res) => {
+  const { token } = req.body || {}
+  if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Token inválido' })
+  const devices = getDevices()
+  if (!devices[token]) return res.status(404).json({ error: 'Dispositivo não encontrado' })
+  delete devices[token]
+  setDevices(devices)
+  res.json({ ok: true })
+})
+
 // ── Geo (pública, usada pelo frontend no registro de dispositivo) ──────────────
 app.get('/api/geo', async (req, res) => {
   try {

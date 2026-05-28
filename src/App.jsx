@@ -412,6 +412,29 @@ function BackgroundOrbs() {
   )
 }
 
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function Toast({ message, color = '#10b981', icon: Icon, onClose }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 3500)
+    return () => clearTimeout(t)
+  }, [onClose])
+  return (
+    <div style={{
+      position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
+      background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)',
+      border: `1px solid ${color}50`, borderRadius: 12,
+      padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10,
+      boxShadow: `0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px ${color}20`,
+    }}>
+      {Icon && <Icon size={16} color={color} />}
+      <span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{message}</span>
+      <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', marginLeft: 4 }}>
+        <X size={14} />
+      </button>
+    </div>
+  )
+}
+
 // ── Badge ─────────────────────────────────────────────────────────────────────
 function Badge({ label, colorMap, icon: Icon }) {
   const color = colorMap[label] || C.textMuted
@@ -927,7 +950,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
           {/* Tempo de casa */}
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
             <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 1, letterSpacing: '.05em', textTransform: 'uppercase' }}>Casa</div>
-            <div style={{ fontSize: 15, fontWeight: 800, fontFamily: 'Inter, sans-serif', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', ...gText(accentColor) }}>
+            <div key={accentColor} style={{ fontSize: 15, fontWeight: 800, fontFamily: 'Inter, sans-serif', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', ...gText(accentColor) }}>
               {calcTempoCasa(tutor.dataInicio)}
             </div>
           </div>
@@ -1310,7 +1333,7 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
       {/* Tempo de casa */}
       <div style={{ flexShrink: 0, textAlign: 'right', minWidth: 42 }}>
         <div style={{ fontSize: 10, color: C.textMuted, letterSpacing: '.05em', textTransform: 'uppercase' }}>Casa</div>
-        <div style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums', ...gText(accentColor) }}>
+        <div key={accentColor} style={{ fontSize: 13, fontWeight: 800, fontVariantNumeric: 'tabular-nums', ...gText(accentColor) }}>
           {calcTempoCasa(tutor.dataInicio)}
         </div>
       </div>
@@ -3111,6 +3134,7 @@ function DevicesPanel() {
   ) : null
 
   const DeviceRow = ({ d }) => {
+    const [confirmDelete, setConfirmDelete] = useState(false)
     const geo = d.geo
     const location = geo
       ? [geo.city, geo.region, geo.country].filter(Boolean).join(', ')
@@ -3194,7 +3218,7 @@ function DevicesPanel() {
       )}
 
       {/* Botões */}
-      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
         {d.status !== 'approved' && (
           <button style={{ ...btn('teal', 'sm') }} onClick={() => act('/api/auth/devices/approve', d.token)}>
             <Check size={12} /> Aprovar
@@ -3205,6 +3229,32 @@ function DevicesPanel() {
             <X size={12} /> {d.status === 'approved' ? 'Revogar' : 'Negar'}
           </button>
         )}
+        <div style={{ position: 'relative' }}>
+          <button style={{ ...btn('ghost', 'sm'), color: confirmDelete ? '#f87171' : C.textMuted, borderColor: confirmDelete ? '#ef444450' : C.border }}
+            onClick={() => setConfirmDelete(v => !v)}>
+            <Trash2 size={12} /> Excluir
+          </button>
+          {confirmDelete && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 699 }} onClick={() => setConfirmDelete(false)} />
+              <div style={{
+                position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, zIndex: 700,
+                background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)',
+                border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, padding: '12px 14px',
+                boxShadow: '0 16px 48px rgba(0,0,0,0.8)', whiteSpace: 'nowrap',
+              }}>
+                <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 8 }}>Excluir permanentemente?</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button style={btn('danger', 'sm')} onClick={() => { act('/api/auth/devices/delete', d.token); setConfirmDelete(false) }}>
+                    <Trash2 size={12} /> Confirmar
+                  </button>
+                  <button style={btn('ghost', 'sm')} onClick={() => setConfirmDelete(false)}><X size={12} /></button>
+                </div>
+                <div style={{ position: 'absolute', bottom: -7, right: 14, width: 0, height: 0, border: '7px solid transparent', borderTopColor: 'rgba(239,68,68,0.4)' }} />
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
     )
@@ -3245,10 +3295,10 @@ function DevicesPanel() {
 }
 
 // ── SettingsModal ─────────────────────────────────────────────────────────────
-function SettingsModal({ open, onClose, onSave }) {
+function SettingsModal({ open, onClose, onSave, initialTab = 'config' }) {
   const [form, setForm] = useState({ ...DEFAULT_CFG })
   const [tab, setTab]   = useState('config')
-  useEffect(() => { if (open) { setForm({ ..._cfg }); setTab('config') } }, [open])
+  useEffect(() => { if (open) { setForm({ ..._cfg }); setTab(initialTab) } }, [open, initialTab])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: Number(v) }))
   const valid = form.baixaMax >= 1 && form.moderadaMax > form.baixaMax && form.diasParaAlerta >= 1
@@ -3561,11 +3611,27 @@ const SEEN_KEY = 'rubinot_seen_alerts'
 const loadSeenMap = () => { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') } catch { return {} } }
 const saveSeenMap = m => localStorage.setItem(SEEN_KEY, JSON.stringify(m))
 
-function Header({ tab, setTab, tutores, onOpenSettings, onChangeServer }) {
-  const [scrolled, setScrolled] = useState(false)
-  const [bellOpen, setBellOpen] = useState(false)
-  const [hovered, setHovered]   = useState(null)
-  const [seenMap, setSeenMap]   = useState(() => loadSeenMap())
+function Header({ tab, setTab, tutores, onOpenSettings, onOpenSettingsDevices, onChangeServer }) {
+  const [scrolled, setScrolled]           = useState(false)
+  const [bellOpen, setBellOpen]           = useState(false)
+  const [hovered, setHovered]             = useState(null)
+  const [seenMap, setSeenMap]             = useState(() => loadSeenMap())
+  const [pendingDevices, setPendingDevices] = useState(0)
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const r = await apiFetch('/api/auth/devices')
+        if (r.ok) {
+          const list = await r.json()
+          setPendingDevices(list.filter(d => d.status === 'pending').length)
+        }
+      } catch {}
+    }
+    check()
+    const id = setInterval(check, 30000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10)
@@ -3661,16 +3727,16 @@ function Header({ tab, setTab, tutores, onOpenSettings, onChangeServer }) {
             }}
           >
             <Bell size={16} />
-            {unseenCount > 0 && (
+            {(unseenCount + pendingDevices) > 0 && (
               <span style={{
                 position: 'absolute', top: -5, right: -5,
-                background: '#f97316', color: '#fff',
+                background: pendingDevices > 0 ? C.primaryLight : '#f97316', color: '#fff',
                 borderRadius: 99, fontSize: 10, fontWeight: 700,
                 minWidth: 17, height: 17, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 padding: '0 4px', lineHeight: 1,
-                boxShadow: '0 0 8px rgba(249,115,22,0.7)',
+                boxShadow: pendingDevices > 0 ? `0 0 8px ${C.primaryLight}99` : '0 0 8px rgba(249,115,22,0.7)',
               }}>
-                {unseenCount}
+                {unseenCount + pendingDevices}
               </span>
             )}
           </button>
@@ -3705,6 +3771,41 @@ function Header({ tab, setTab, tutores, onOpenSettings, onChangeServer }) {
                     </span>
                   )}
                 </div>
+
+                {/* Dispositivos pendentes */}
+                {pendingDevices > 0 && (
+                  <button
+                    onClick={() => { setBellOpen(false); onOpenSettingsDevices?.() }}
+                    style={{
+                      width: '100%', background: `${C.primaryLight}12`,
+                      border: 'none', borderBottom: `1px solid ${C.border}`,
+                      cursor: 'pointer', padding: '10px 16px',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      transition: 'background .15s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = `${C.primaryLight}22`}
+                    onMouseLeave={e => e.currentTarget.style.background = `${C.primaryLight}12`}
+                  >
+                    <div style={{
+                      width: 28, height: 28, borderRadius: 7, flexShrink: 0,
+                      background: `${C.primaryLight}20`, border: `1px solid ${C.primaryLight}40`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <Globe size={13} color={C.primaryBright} />
+                    </div>
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.primaryBright }}>
+                        {pendingDevices} dispositivo{pendingDevices !== 1 ? 's' : ''} aguardando aprovação
+                      </div>
+                      <div style={{ fontSize: 10, color: C.textMuted }}>Clique para gerenciar</div>
+                    </div>
+                    <span style={{
+                      background: `${C.primaryLight}20`, border: `1px solid ${C.primaryLight}40`,
+                      borderRadius: 99, fontSize: 10, fontWeight: 700, color: C.primaryBright,
+                      padding: '1px 7px',
+                    }}>{pendingDevices}</span>
+                  </button>
+                )}
 
                 {/* Lista */}
                 {alertas.length === 0 ? (
@@ -4170,12 +4271,12 @@ function DeviceRequestScreen({ onRequest }) {
 }
 
 function DeviceAwaitingScreen({ onRetry }) {
-  const [countdown, setCountdown] = useState(30)
+  const [countdown, setCountdown] = useState(5)
 
   useEffect(() => {
     const tick = setInterval(() => {
       setCountdown(c => {
-        if (c <= 1) { onRetry(); return 30 }
+        if (c <= 1) { onRetry(); return 5 }
         return c - 1
       })
     }, 1000)
@@ -4291,11 +4392,12 @@ function DeviceDeniedScreen() {
   )
 }
 
-function LoginScreen({ onLogin }) {
-  const [password, setPassword] = useState('')
-  const [error, setError]       = useState('')
-  const [loading, setLoading]   = useState(false)
-  const [show, setShow]         = useState(false)
+function LoginScreen({ onLogin, justApproved }) {
+  const [password, setPassword]     = useState('')
+  const [error, setError]           = useState('')
+  const [loading, setLoading]       = useState(false)
+  const [show, setShow]             = useState(false)
+  const [showToast, setShowToast]   = useState(justApproved)
   const inputRef = useRef(null)
 
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 80) }, [])
@@ -4324,6 +4426,14 @@ function LoginScreen({ onLogin }) {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
       <BackgroundImage />
+      {showToast && (
+        <Toast
+          message="Dispositivo aprovado! Faça login para continuar."
+          color="#10b981"
+          icon={UserCheck}
+          onClose={() => setShowToast(false)}
+        />
+      )}
       <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 360, padding: '0 16px' }}>
         <div style={{
           background: C.card, border: `1px solid ${C.border}`, borderRadius: 16,
@@ -4383,7 +4493,9 @@ function LoginScreen({ onLogin }) {
 }
 
 function AuthGate() {
-  const [status, setStatus] = useState('checking')
+  const [status, setStatus]           = useState('checking')
+  const [justApproved, setJustApproved] = useState(false)
+  const wasAwaitingRef                = useRef(false)
 
   const checkDevice = useCallback(async () => {
     const deviceToken = getDeviceToken()
@@ -4399,17 +4511,22 @@ function AuthGate() {
 
       if (ds === 'approved') {
         const authToken = getToken()
-        if (!authToken) { setStatus('login'); return }
+        if (!authToken) {
+          if (wasAwaitingRef.current) setJustApproved(true)
+          setStatus('login')
+          return
+        }
         const vr = await fetch(API + '/api/auth/verify', { headers: { 'x-auth-token': authToken } })
         setStatus(vr.ok ? (getServer() ? 'ok' : 'server-select') : 'login')
       } else if (ds === 'pending') {
+        wasAwaitingRef.current = true
         setStatus('awaiting')
       } else if (ds === 'denied') {
         if (!localStorage.getItem(DENIED_AT_KEY))
           localStorage.setItem(DENIED_AT_KEY, Date.now().toString())
         setStatus('denied')
       } else {
-        // token existe mas servidor não reconhece (ex: reiniciou) — mantém aguardando
+        wasAwaitingRef.current = true
         setStatus('awaiting')
       }
     } catch {
@@ -4450,18 +4567,21 @@ function AuthGate() {
   if (status === 'request-access') return <DeviceRequestScreen onRequest={handleRequestAccess} />
   if (status === 'awaiting') return <DeviceAwaitingScreen onRetry={checkDevice} />
   if (status === 'denied') return <DeviceDeniedScreen />
-  if (status === 'login') return <LoginScreen onLogin={handleLogin} />
+  if (status === 'login') return <LoginScreen onLogin={handleLogin} justApproved={justApproved} />
   if (status === 'server-select') return <ServerSelectScreen onSelect={handleSelectServer} />
   return <App key={getServer()} onChangeServer={() => setStatus('server-select')} />
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
 function App({ onChangeServer }) {
-  const [tab, setTab]           = useState('cadastro')
-  const [tutores, setTutores]   = useState([])
-  const [dataLoaded, setDataLoaded] = useState(false)
+  const [tab, setTab]                   = useState('cadastro')
+  const [tutores, setTutores]           = useState([])
+  const [dataLoaded, setDataLoaded]     = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [apiKey, setApiKey]     = useState('')
+  const [settingsTab, setSettingsTab]   = useState('config')
+  const [apiKey, setApiKey]             = useState('')
+
+  const openSettings = useCallback((t = 'config') => { setSettingsTab(t); setSettingsOpen(true) }, [])
 
   const handleSaveSettings = cfg => {
     _cfg = cfg
@@ -4519,16 +4639,26 @@ function App({ onChangeServer }) {
     <div style={{ minHeight: '100vh', background: 'transparent', position: 'relative', zIndex: 1 }}>
       <BackgroundImage />
       <div style={{ position: 'relative', zIndex: 1 }}>
-        <Header tab={tab} setTab={setTab} tutores={tutores} onOpenSettings={() => setSettingsOpen(true)} onChangeServer={onChangeServer} />
+        <Header tab={tab} setTab={setTab} tutores={tutores} onOpenSettings={() => openSettings('config')} onOpenSettingsDevices={() => openSettings('devices')} onChangeServer={onChangeServer} />
         <main key={tab} className="tab-enter" style={{ paddingBottom: 60 }}>
-          {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} />}
-          {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKey={apiKey} onSaveApiKey={handleSaveApiKey} />}
+          {!dataLoaded ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 16 }}>
+              <Loader2 size={32} color={C.primaryBright} style={{ animation: 'spin 1s linear infinite' }} />
+              <span style={{ fontSize: 13, color: C.textMuted }}>Carregando dados...</span>
+            </div>
+          ) : (
+            <>
+              {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} />}
+              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKey={apiKey} onSaveApiKey={handleSaveApiKey} />}
+            </>
+          )}
         </main>
       </div>
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onSave={handleSaveSettings}
+        initialTab={settingsTab}
       />
       <FloatingChat tutores={tutores} setTutores={setTutores} apiKey={apiKey} />
     </div>
