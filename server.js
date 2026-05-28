@@ -391,7 +391,8 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   const todosNicks = (tutores || []).map(t => `${t.nick} (${t.cargo})`).join(', ')
   const resumo = (tutores || []).map(t => {
     const mesAtual = todayStr.slice(0, 7)
-    const presencasMes = (t.presencas || []).filter(d => d.startsWith(mesAtual)).length
+    const presencasMesLista = (t.presencas || []).filter(d => d.startsWith(mesAtual)).sort()
+    const presencasMes = presencasMesLista.length
     const ultimaPresenca = [...(t.presencas || [])].sort().at(-1) || null
     const ausenciaAtiva = (t.ausencias || []).find(a => a.dataFim >= todayStr)
     const refDate = ultimaPresenca || t.dataInicio || todayStr
@@ -401,7 +402,8 @@ app.post('/api/chat', requireAuth, async (req, res) => {
       : t.dataInicio >= todayStr
         ? `entrou hoje — sem presenças ainda (0d)`
         : `sem presenças — entrou em ${t.dataInicio} (${diasSem}d desde entrada)`
-    return `- ${t.nick} | cargo: ${t.cargo} | na equipe desde: ${t.dataInicio || '?'} | presenças este mês: ${presencasMes} | ${semInfo}${ausenciaAtiva ? ` | AUSENTE até ${ausenciaAtiva.dataFim}` : ''}${t.obs ? ` | obs: ${t.obs}` : ''}`
+    const datasPresenca = presencasMesLista.length ? ` | datas este mês: [${presencasMesLista.join(', ')}]` : ''
+    return `- ${t.nick} | cargo: ${t.cargo} | na equipe desde: ${t.dataInicio || '?'} | presenças este mês: ${presencasMes}${datasPresenca} | ${semInfo}${ausenciaAtiva ? ` | AUSENTE até ${ausenciaAtiva.dataFim}` : ''}${t.obs ? ` | obs: ${t.obs}` : ''}`
   }).join('\n')
 
   const historicoFmt = (history || []).slice(-8).map(m =>
@@ -443,6 +445,7 @@ REGRAS CRÍTICAS — LEIA COM ATENÇÃO:
 - Para "quem não aparece há X dias": tutores com 0d NÃO são inativos. Tutores que entraram hoje têm 0 dias.
 - Se o nick bate exatamente com alguém da lista e a ação é clara: EXECUTE diretamente, sem pedir confirmação.
 - Só peça confirmação quando houver ambiguidade REAL: nick parecido mas não exato, data incerta, ou ação genuinamente dúbia.
+- Se o tutor JÁ TEM a data solicitada na lista "datas este mês", NÃO execute add_presenca — deixe "acoes": [] e informe o usuário que a presença já está registrada para aquela data.
 - NUNCA execute ações em massa a partir de uma confirmação que se referia a ação individual.`
 
   try {
