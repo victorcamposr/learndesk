@@ -319,6 +319,17 @@ app.post('/api/auth/devices/deny', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
+// ── Geo (pública, usada pelo frontend no registro de dispositivo) ──────────────
+app.get('/api/geo', async (_req, res) => {
+  try {
+    const r = await fetch('http://ip-api.com/json/?fields=status,city,regionName,country&lang=pt-BR')
+    const d = await r.json()
+    res.json(d)
+  } catch {
+    res.json({ status: 'fail' })
+  }
+})
+
 // ── Rotas protegidas ───────────────────────────────────────────────────────────
 app.get('/api/tutores', requireAuth, (req, res) => res.json(getKV(serverKey(req, 'tutores')) || []))
 
