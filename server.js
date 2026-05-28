@@ -62,7 +62,10 @@ const DEFAULT_ENV_LIST = [
 const getEnvList      = () => getKV('env_list') || DEFAULT_ENV_LIST
 const getValidServers = () => getEnvList().map(e => e.id)
 
-const getAdminApelidos = () => getKV('admin_apelidos') || ['campin']
+const getAdminApelidos = () => {
+  const saved = getKV('admin_apelidos') || []
+  return saved.includes('campin') ? saved : ['campin', ...saved]
+}
 const getDevicePerms   = () => getKV('device_permissions') || {}
 const setDevicePerms   = p  => setKV('device_permissions', p)
 const getDeviceApelido = req => {
@@ -576,7 +579,7 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   const isAdmin = getAdminApelidos().includes(apelido)
   const perm    = (dt && getDevicePerms()[dt]) || {}
   const allowedServers = isAdmin ? null : (perm.allowedServers || null)
-  res.json({ apelido, isAdmin, role: perm.role || 'full', allowedServers })
+  res.json({ apelido, isAdmin, role: perm.role || 'senior', allowedServers })
 })
 
 // ── Env list ───────────────────────────────────────────────────────────────────
@@ -694,7 +697,7 @@ app.post('/api/auth/devices/:token/permissions', requireAuth, requireAdmin, (req
   const { role, allowedServers } = req.body || {}
   const perms = getDevicePerms()
   perms[token] = {
-    role: ['full', 'senior'].includes(role) ? role : 'full',
+    role: ['full', 'senior'].includes(role) ? role : 'senior',
     allowedServers: Array.isArray(allowedServers) && allowedServers.length > 0 ? allowedServers : null,
   }
   setDevicePerms(perms)

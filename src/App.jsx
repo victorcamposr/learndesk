@@ -13,7 +13,7 @@ import {
   AtSign, Sparkles, Loader2, Eye, EyeOff, History, Copy,
   CalendarCheck, CalendarPlus, Bell, Settings, Bot, Send, Mail,
   Globe, Rocket, ArrowLeftRight, LayoutGrid, List,
-  Lock, LockOpen, Key, Crown, Palette, Swords,
+  Lock, LockOpen, Key, Crown, Palette, Swords, Download,
 } from 'lucide-react'
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
@@ -1803,12 +1803,92 @@ function ImportModal({ open, onClose, tutores, onImport }) {
   )
 }
 
+// ── ExportModal ───────────────────────────────────────────────────────────────
+function dateToExcelSerial(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr + 'T00:00:00Z')
+  return Math.round(d.getTime() / 86400000) + 25569
+}
+
+function ExportModal({ open, onClose, tutores }) {
+  const handleDownload = () => {
+    const header = ['#', 'Cargo', 'Celular', 'Nome RL', 'Nick', 'Atividade', 'Data Início', '', '', 'Horário', 'Detalhe Horário', 'Obs']
+    const rows = tutores.map((t, i) => [
+      i + 1,
+      t.cargo || '',
+      t.celular || '',
+      t.nomeRL || '',
+      t.nick || '',
+      t.atividade || '',
+      dateToExcelSerial(t.dataInicio),
+      '', '',
+      t.horarios || '',
+      t.detalheHorario || '',
+      t.obs || '',
+    ])
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
+    ws['!cols'] = [{ wch: 4 }, { wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, {}, {}, { wch: 14 }, { wch: 20 }, { wch: 30 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Tutores')
+    XLSX.writeFile(wb, `tutores-${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Exportar Planilha" icon={Download} maxWidth={600} accentColor={C.teal}>
+      <div style={{ fontSize: 13, color: C.textSoft, marginBottom: 16 }}>
+        Exporta todos os <strong style={{ color: C.text }}>{tutores.length} tutor{tutores.length !== 1 ? 'es' : ''}</strong> no mesmo formato aceito pela importação.
+      </div>
+
+      {/* Preview */}
+      <div style={{ overflowX: 'auto', borderRadius: 10, border: `1px solid ${C.border}`, marginBottom: 20 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+          <thead>
+            <tr style={{ background: 'rgba(99,102,241,0.1)' }}>
+              {['Cargo', 'Nick', 'Nome RL', 'Atividade', 'Horário'].map(h => (
+                <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: C.textMuted, fontWeight: 600, borderBottom: `1px solid ${C.border}`, whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tutores.slice(0, 6).map((t, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: '7px 12px' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: `${CARGO_BADGE_COLOR[t.cargo] || C.textMuted}18`, color: CARGO_BADGE_COLOR[t.cargo] || C.textMuted }}>{t.cargo}</span>
+                </td>
+                <td style={{ padding: '7px 12px', color: C.gold, fontWeight: 600 }}>{t.nick}</td>
+                <td style={{ padding: '7px 12px', color: C.textSoft }}>{t.nomeRL || '—'}</td>
+                <td style={{ padding: '7px 12px', color: C.textSoft }}>{t.atividade || '—'}</td>
+                <td style={{ padding: '7px 12px', color: C.textSoft }}>{t.horarios || '—'}</td>
+              </tr>
+            ))}
+            {tutores.length > 6 && (
+              <tr>
+                <td colSpan={5} style={{ padding: '8px 12px', textAlign: 'center', color: C.textMuted, fontSize: 11 }}>
+                  + {tutores.length - 6} tutor{tutores.length - 6 !== 1 ? 'es' : ''} não exibido{tutores.length - 6 !== 1 ? 's' : ''}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button onClick={onClose} style={btn('subtle', 'md')}>Cancelar</button>
+        <button onClick={() => { handleDownload(); onClose() }} style={{ ...btn('teal', 'md'), justifyContent: 'center' }} disabled={tutores.length === 0}>
+          <Download size={14} /> Baixar .xlsx ({tutores.length})
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 function CadastroTab({ tutores, setTutores }) {
   const [modalOpen, setModalOpen]   = useState(false)
   const [editId, setEditId]         = useState(null)
   const [ausenciaId, setAusenciaId] = useState(null)
   const [obsId, setObsId]           = useState(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const [profileId, setProfileId]   = useState(null)
   const [search, setSearch]         = useState('')
   const [viewMode, setViewMode]     = useState('list')
@@ -1892,6 +1972,9 @@ function CadastroTab({ tutores, setTutores }) {
         </div>
         <button style={btn('subtle')} onClick={() => setImportOpen(true)}>
           <ClipboardList size={15} /> Importar
+        </button>
+        <button style={btn('subtle')} onClick={() => setExportOpen(true)}>
+          <Download size={15} /> Exportar
         </button>
         <button style={btn('gold')} onClick={handleNew}>
           <UserPlus size={15} /> Novo Tutor
@@ -1995,6 +2078,12 @@ function CadastroTab({ tutores, setTutores }) {
         onClose={() => setImportOpen(false)}
         tutores={tutores}
         onImport={novos => setTutores(prev => [...prev, ...novos])}
+      />
+
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        tutores={tutores}
       />
 
       <AusenciaModal
@@ -3156,13 +3245,204 @@ function DashboardRow({ t }) {
 }
 
 // ── DevicesPanel ──────────────────────────────────────────────────────────────
+function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmin,
+  editingPermsToken, editAllowed, onToggleWorld, onSavePerms, onCancelPerms, savingPerm, onOpenPerms }) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [expanded, setExpanded]           = useState(false)
+
+  const isAdmin   = d.apelido && adminApelidos.includes(d.apelido)
+  const perm      = permissions[d.token] || {}
+  const isEditing = editingPermsToken === d.token
+
+  const statusColor = { approved: '#10b981', pending: C.gold, denied: '#ef4444' }
+  const statusLabel = { approved: 'Aprovado', pending: 'Pendente', denied: 'Negado' }
+
+  const geo = d.geo
+  const location = geo ? [geo.city, geo.region, geo.country].filter(Boolean).join(', ') : d.ip
+  const isp = geo?.isp
+
+  const InfoChip = ({ label, value, color }) => value ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <span style={{ fontSize: 9, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</span>
+      <span style={{ fontSize: 11, color: color || C.text, fontWeight: 600 }}>{value}</span>
+    </div>
+  ) : null
+
+  return (
+    <div style={{
+      background: d.status === 'pending' ? 'rgba(245,158,11,0.06)' : 'rgba(255,255,255,0.02)',
+      border: `1px solid ${d.status === 'pending' ? 'rgba(245,158,11,0.3)' : C.border}`,
+      borderRadius: 12, padding: '14px 16px', marginBottom: 10,
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <div style={{
+          width: 34, height: 34, borderRadius: 9, flexShrink: 0,
+          background: `${statusColor[d.status]}18`, border: `1px solid ${statusColor[d.status]}40`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Globe size={14} color={statusColor[d.status]} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 1 }}>
+            {d.apelido && <span style={{ fontSize: 13, fontWeight: 700, color: C.gold }}>{d.apelido}</span>}
+            {isAdmin && (
+              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.18)', border: `1px solid ${C.primaryBright}40`, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.06em' }}>Admin</span>
+            )}
+            {!isAdmin && perm.allowedServers?.length > 0 && (
+              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(20,184,166,0.12)', border: `1px solid ${C.teal}40`, color: C.teal, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                {perm.allowedServers.length} mundo{perm.allowedServers.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: C.textMuted }}>{d.browser || '?'} · {d.os || '?'}</div>
+          <div style={{ fontSize: 10, color: C.textMuted }}>Solicitado: {new Date(d.requestedAt).toLocaleString('pt-BR')}</div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 6, color: statusColor[d.status], background: `${statusColor[d.status]}18`, border: `1px solid ${statusColor[d.status]}40` }}>{statusLabel[d.status]}</span>
+          <button style={{ ...btn('ghost', 'sm'), fontSize: 10 }} onClick={() => setExpanded(v => !v)}>
+            {expanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Detalhes expandíveis */}
+      {expanded && (
+        <>
+          {(location || isp) && (
+            <div style={{ background: 'rgba(99,102,241,0.07)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', marginBottom: 8, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+              {location && <InfoChip label="Localização" value={location} color={C.primaryBright} />}
+              {isp      && <InfoChip label="ISP" value={isp} color={C.textSoft} />}
+              {d.ip     && <InfoChip label="IP" value={d.ip} />}
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '6px 14px', background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px', marginBottom: 8 }}>
+            <InfoChip label="Tela"        value={d.screen} />
+            <InfoChip label="Pixel Ratio" value={d.pixelRatio ? `${d.pixelRatio}x` : null} />
+            <InfoChip label="CPU"         value={d.cpuCores ? `${d.cpuCores} cores` : null} />
+            <InfoChip label="RAM"         value={d.ramGB ? `~${d.ramGB} GB` : null} />
+            <InfoChip label="Timezone"    value={d.timezone} />
+            <InfoChip label="Idioma"      value={d.language} />
+            <InfoChip label="Rede"        value={d.network} />
+            <InfoChip label="Plataforma"  value={d.platform} />
+          </div>
+          {(d.gpu || d.canvasFP) && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
+              {d.gpu      && <InfoChip label="GPU" value={d.gpu.slice(0, 60) + (d.gpu.length > 60 ? '…' : '')} color={C.teal} />}
+              {d.canvasFP && <InfoChip label="Canvas FP" value={`#${d.canvasFP}`} color={C.textSoft} />}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Permissões (só aprovados com apelido) */}
+      {d.apelido && d.status === 'approved' && (
+        <div style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isEditing ? 10 : 0 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em' }}>Acesso</span>
+              {isAdmin
+                ? <span style={{ fontSize: 11, color: C.primaryBright }}>Administrador total</span>
+                : perm.allowedServers?.length > 0
+                  ? <span style={{ fontSize: 11, color: C.teal }}>{perm.allowedServers.length} mundo{perm.allowedServers.length !== 1 ? 's' : ''} permitido{perm.allowedServers.length !== 1 ? 's' : ''}</span>
+                  : <span style={{ fontSize: 11, color: C.textSoft }}>Todos os mundos</span>
+              }
+            </div>
+            {!isEditing && (
+              <button style={{ ...btn('ghost', 'sm'), fontSize: 10 }} onClick={() => onOpenPerms(d.token, perm.allowedServers || [])}>
+                Editar
+              </button>
+            )}
+          </div>
+
+          {isEditing && (
+            <>
+              {/* Admin toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontSize: 12, color: C.text }}>Administrador</span>
+                <button style={{ ...btn(isAdmin ? 'primary' : 'ghost', 'sm'), minWidth: 76 }} onClick={() => onToggleAdmin(d.apelido, isAdmin)}>
+                  {isAdmin ? 'Remover' : 'Conceder'}
+                </button>
+              </div>
+
+              {/* Mundos (só se não admin) */}
+              {!isAdmin && (
+                <>
+                  <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>Mundos permitidos — vazio = todos:</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                    {(servers || SERVERS).map(s => {
+                      const checked = editAllowed.includes(s.id)
+                      return (
+                        <button key={s.id} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer', background: checked ? `${s.color}22` : 'rgba(255,255,255,0.03)', border: `1px solid ${checked ? s.color + '80' : C.border}`, color: checked ? s.color : C.textMuted, fontWeight: checked ? 700 : 400 }} onClick={() => onToggleWorld(s.id)}>
+                          {s.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button style={btn('ghost', 'sm')} onClick={onCancelPerms}><X size={11} /> Cancelar</button>
+                    <button style={{ ...btn('teal', 'sm'), opacity: savingPerm ? 0.6 : 1 }} disabled={savingPerm} onClick={() => onSavePerms(d.token)}>
+                      {savingPerm ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={11} />} Salvar
+                    </button>
+                  </div>
+                </>
+              )}
+              {isAdmin && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button style={btn('ghost', 'sm')} onClick={onCancelPerms}><X size={11} /> Fechar</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Ações */}
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+        {d.status !== 'approved' && (
+          <button style={btn('teal', 'sm')} onClick={() => onAct('/api/auth/devices/approve', d.token)}>
+            <Check size={12} /> Aprovar
+          </button>
+        )}
+        {d.status !== 'denied' && (
+          <button style={btn('danger', 'sm')} onClick={() => onAct('/api/auth/devices/deny', d.token)}>
+            <X size={12} /> {d.status === 'approved' ? 'Revogar' : 'Negar'}
+          </button>
+        )}
+        <div style={{ position: 'relative' }}>
+          <button style={{ ...btn('ghost', 'sm'), color: confirmDelete ? '#f87171' : C.textMuted, borderColor: confirmDelete ? '#ef444450' : C.border }} onClick={() => setConfirmDelete(v => !v)}>
+            <Trash2 size={12} /> Excluir
+          </button>
+          {confirmDelete && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 699 }} onClick={() => setConfirmDelete(false)} />
+              <div style={{ position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, zIndex: 700, background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, padding: '12px 14px', boxShadow: '0 16px 48px rgba(0,0,0,0.8)', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 8 }}>Excluir permanentemente?</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button style={btn('danger', 'sm')} onClick={() => { onAct('/api/auth/devices/delete', d.token); setConfirmDelete(false) }}>
+                    <Trash2 size={12} /> Confirmar
+                  </button>
+                  <button style={btn('ghost', 'sm')} onClick={() => setConfirmDelete(false)}><X size={12} /></button>
+                </div>
+                <div style={{ position: 'absolute', bottom: -7, right: 14, width: 0, height: 0, border: '7px solid transparent', borderTopColor: 'rgba(239,68,68,0.4)' }} />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
-  const [devices, setDevices]         = useState([])
-  const [adminApelidos, setAdminAp]   = useState([])
-  const [permissions, setPerms]       = useState({})
-  const [loading, setLoading]         = useState(false)
-  const [search, setSearch]           = useState('')
-  const [expandedToken, setExpanded]  = useState(null)
+  const [devices, setDevices]               = useState([])
+  const [adminApelidos, setAdminAp]         = useState([])
+  const [permissions, setPerms]             = useState({})
+  const [loading, setLoading]               = useState(false)
+  const [search, setSearch]                 = useState('')
+  const [editingPermsToken, setEditingPermsToken] = useState(null)
+  const [editAllowed, setEditAllowed]       = useState([])
+  const [savingPerm, setSavingPerm]         = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -3186,289 +3466,44 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   }
 
   const toggleAdmin = async (apelido, isAdmin) => {
-    const updated = isAdmin
-      ? adminApelidos.filter(a => a !== apelido)
-      : [...adminApelidos, apelido]
+    const updated = isAdmin ? adminApelidos.filter(a => a !== apelido) : [...adminApelidos, apelido]
     await apiFetch('/api/admin/apelidos', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apelidos: updated }),
     })
     load()
   }
 
-  const savePerms = async (token, role, allowedServers) => {
+  const handleSavePerms = async token => {
+    setSavingPerm(true)
     await apiFetch(`/api/auth/devices/${token}/permissions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role, allowedServers: allowedServers.length > 0 ? allowedServers : null }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'senior', allowedServers: editAllowed.length > 0 ? editAllowed : null }),
     })
+    setSavingPerm(false)
+    setEditingPermsToken(null)
     load()
   }
 
-  const statusColor = { approved: '#10b981', pending: C.gold, denied: '#ef4444' }
-  const statusLabel = { approved: 'Aprovado', pending: 'Pendente', denied: 'Negado' }
+  const openPerms = (token, allowed) => { setEditingPermsToken(token); setEditAllowed(allowed) }
+  const cancelPerms = () => setEditingPermsToken(null)
+  const toggleWorld = id => setEditAllowed(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
 
   const q = search.trim().toLowerCase()
-  const filtered = devices.filter(d => {
-    if (!q) return true
-    return (d.apelido || '').toLowerCase().includes(q)
-      || (d.browser || '').toLowerCase().includes(q)
-      || (d.os || '').toLowerCase().includes(q)
-  })
-
+  const filtered = devices.filter(d =>
+    !q || (d.apelido || '').toLowerCase().includes(q) || (d.browser || '').toLowerCase().includes(q) || (d.os || '').toLowerCase().includes(q)
+  )
   const pending = filtered.filter(d => d.status === 'pending')
   const others  = filtered.filter(d => d.status !== 'pending')
 
-  const InfoChip = ({ label, value, color }) => value ? (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <span style={{ fontSize: 9, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</span>
-      <span style={{ fontSize: 11, color: color || C.text, fontWeight: 600 }}>{value}</span>
-    </div>
-  ) : null
-
-  const DeviceRow = ({ d }) => {
-    const [confirmDelete, setConfirmDelete] = useState(false)
-    const isExpanded = expandedToken === d.token
-    const isAdmin    = d.apelido && adminApelidos.includes(d.apelido)
-    const perm       = permissions[d.token] || {}
-    const [localRole, setLocalRole]             = useState(perm.role || 'full')
-    const [localAllowed, setLocalAllowed]       = useState(perm.allowedServers || [])
-    const [savingPerm, setSavingPerm]           = useState(false)
-
-    useEffect(() => {
-      setLocalRole(perm.role || 'full')
-      setLocalAllowed(perm.allowedServers || [])
-    }, [perm.role, JSON.stringify(perm.allowedServers)])
-
-    const geo = d.geo
-    const location = geo
-      ? [geo.city, geo.region, geo.country].filter(Boolean).join(', ')
-      : d.ip
-    const isp = geo?.isp
-
-    const toggleWorld = id => setLocalAllowed(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    )
-
-    return (
-    <div style={{
-      background: d.status === 'pending' ? 'rgba(245,158,11,0.06)' : 'rgba(255,255,255,0.02)',
-      border: `1px solid ${d.status === 'pending' ? 'rgba(245,158,11,0.3)' : C.border}`,
-      borderRadius: 12, padding: '14px 16px', marginBottom: 10,
-    }}>
-      {/* Header: status badge + data */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <div style={{
-          width: 34, height: 34, borderRadius: 9, flexShrink: 0,
-          background: `${statusColor[d.status]}18`, border: `1px solid ${statusColor[d.status]}40`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Globe size={14} color={statusColor[d.status]} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 1 }}>
-            {d.apelido && (
-              <span style={{ fontSize: 13, fontWeight: 700, color: C.gold }}>{d.apelido}</span>
-            )}
-            {isAdmin && (
-              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.18)', border: `1px solid ${C.primaryBright}40`, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.06em' }}>Admin</span>
-            )}
-            {perm.role === 'senior' && (
-              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: 'rgba(20,184,166,0.12)', border: `1px solid ${C.teal}40`, color: C.teal, textTransform: 'uppercase', letterSpacing: '.06em' }}>Sênior</span>
-            )}
-          </div>
-          <div style={{ fontSize: d.apelido ? 11 : 13, fontWeight: d.apelido ? 400 : 700, color: d.apelido ? C.textMuted : C.text }}>
-            {d.browser || '?'} · {d.os || '?'}
-          </div>
-          <div style={{ fontSize: 11, color: C.textMuted }}>
-            Solicitado: {new Date(d.requestedAt).toLocaleString('pt-BR')}
-          </div>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-          <span style={{
-            fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 6,
-            color: statusColor[d.status], background: `${statusColor[d.status]}18`,
-            border: `1px solid ${statusColor[d.status]}40`,
-          }}>{statusLabel[d.status]}</span>
-          <button style={{ ...btn('ghost', 'sm'), fontSize: 10 }} onClick={() => setExpanded(isExpanded ? null : d.token)}>
-            {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />} Detalhes
-          </button>
-        </div>
-      </div>
-
-      {/* Expandable details */}
-      {isExpanded && (
-        <>
-          {/* Localização */}
-          {(location || isp) && (
-            <div style={{
-              background: 'rgba(99,102,241,0.07)', border: `1px solid ${C.border}`,
-              borderRadius: 8, padding: '8px 12px', marginBottom: 10, display: 'flex', gap: 14, flexWrap: 'wrap',
-            }}>
-              {location && <InfoChip label="Localização" value={location} color={C.primaryBright} />}
-              {isp      && <InfoChip label="Provedor (ISP)" value={isp} color={C.textSoft} />}
-              {d.ip     && <InfoChip label="IP" value={d.ip} />}
-            </div>
-          )}
-
-          {/* Hardware / Software */}
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
-            gap: '8px 16px', background: 'rgba(255,255,255,0.02)',
-            border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px', marginBottom: 10,
-          }}>
-            <InfoChip label="Tela"         value={d.screen} />
-            <InfoChip label="Pixel Ratio"  value={d.pixelRatio ? `${d.pixelRatio}x` : null} />
-            <InfoChip label="Cor"          value={d.colorDepth ? `${d.colorDepth}-bit` : null} />
-            <InfoChip label="CPU (cores)"  value={d.cpuCores ? `${d.cpuCores} cores` : null} />
-            <InfoChip label="RAM"          value={d.ramGB ? `~${d.ramGB} GB` : null} />
-            <InfoChip label="Timezone"     value={d.timezone} />
-            <InfoChip label="Idioma"       value={d.language} />
-            <InfoChip label="Rede"         value={d.network} />
-            <InfoChip label="Plataforma"   value={d.platform} />
-          </div>
-
-          {/* GPU + Canvas fingerprint */}
-          {(d.gpu || d.canvasFP) && (
-            <div style={{
-              display: 'flex', gap: 10, flexWrap: 'wrap',
-              background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`,
-              borderRadius: 8, padding: '8px 12px', marginBottom: 10,
-            }}>
-              {d.gpu      && <InfoChip label="GPU" value={d.gpu.slice(0, 60) + (d.gpu.length > 60 ? '…' : '')} color={C.teal} />}
-              {d.canvasFP && <InfoChip label="Canvas Fingerprint" value={`#${d.canvasFP}`} color={C.textSoft} />}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Permissões */}
-      {d.apelido && d.status === 'approved' && (
-        <div style={{
-          background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`,
-          borderRadius: 8, padding: '10px 12px', marginBottom: 10,
-        }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8 }}>Permissões</div>
-          {/* Admin toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ fontSize: 12, color: C.text }}>Administrador</span>
-            <button
-              style={{ ...btn(isAdmin ? 'primary' : 'ghost', 'sm'), minWidth: 70 }}
-              onClick={() => toggleAdmin(d.apelido, isAdmin)}
-            >
-              {isAdmin ? 'Remover' : 'Conceder'}
-            </button>
-          </div>
-          {/* Role selector */}
-          {!isAdmin && (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: C.text }}>Nível de acesso</span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {['full', 'senior'].map(r => (
-                    <button key={r} style={{
-                      ...btn(localRole === r ? 'primary' : 'ghost', 'sm'),
-                      fontSize: 11,
-                    }} onClick={() => setLocalRole(r)}>
-                      {r === 'full' ? 'Total' : 'Sênior'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {localRole === 'senior' && (
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>Mundos permitidos (vazio = todos):</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {(servers || SERVERS).map(s => {
-                      const checked = localAllowed.includes(s.id)
-                      return (
-                        <button key={s.id} style={{
-                          fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
-                          background: checked ? `${s.color}22` : 'rgba(255,255,255,0.03)',
-                          border: `1px solid ${checked ? s.color + '80' : C.border}`,
-                          color: checked ? s.color : C.textMuted, fontWeight: checked ? 700 : 400,
-                        }} onClick={() => toggleWorld(s.id)}>
-                          {s.name}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  style={{ ...btn('teal', 'sm'), opacity: savingPerm ? 0.6 : 1 }}
-                  disabled={savingPerm}
-                  onClick={async () => {
-                    setSavingPerm(true)
-                    await savePerms(d.token, localRole, localRole === 'senior' ? localAllowed : [])
-                    setSavingPerm(false)
-                  }}
-                >
-                  {savingPerm ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={11} />}
-                  Salvar
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Botões de ação */}
-      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-        {d.status !== 'approved' && (
-          <button style={{ ...btn('teal', 'sm') }} onClick={() => act('/api/auth/devices/approve', d.token)}>
-            <Check size={12} /> Aprovar
-          </button>
-        )}
-        {d.status !== 'denied' && (
-          <button style={{ ...btn('danger', 'sm') }} onClick={() => act('/api/auth/devices/deny', d.token)}>
-            <X size={12} /> {d.status === 'approved' ? 'Revogar' : 'Negar'}
-          </button>
-        )}
-        <div style={{ position: 'relative' }}>
-          <button style={{ ...btn('ghost', 'sm'), color: confirmDelete ? '#f87171' : C.textMuted, borderColor: confirmDelete ? '#ef444450' : C.border }}
-            onClick={() => setConfirmDelete(v => !v)}>
-            <Trash2 size={12} /> Excluir
-          </button>
-          {confirmDelete && (
-            <>
-              <div style={{ position: 'fixed', inset: 0, zIndex: 699 }} onClick={() => setConfirmDelete(false)} />
-              <div style={{
-                position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, zIndex: 700,
-                background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)',
-                border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, padding: '12px 14px',
-                boxShadow: '0 16px 48px rgba(0,0,0,0.8)', whiteSpace: 'nowrap',
-              }}>
-                <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 8 }}>Excluir permanentemente?</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button style={btn('danger', 'sm')} onClick={() => { act('/api/auth/devices/delete', d.token); setConfirmDelete(false) }}>
-                    <Trash2 size={12} /> Confirmar
-                  </button>
-                  <button style={btn('ghost', 'sm')} onClick={() => setConfirmDelete(false)}><X size={12} /></button>
-                </div>
-                <div style={{ position: 'absolute', bottom: -7, right: 14, width: 0, height: 0, border: '7px solid transparent', borderTopColor: 'rgba(239,68,68,0.4)' }} />
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-    )
-  }
+  const rowProps = { adminApelidos, permissions, servers, onAct: act, onToggleAdmin: toggleAdmin, editingPermsToken, editAllowed, onToggleWorld: toggleWorld, onSavePerms: handleSavePerms, onCancelPerms: cancelPerms, savingPerm, onOpenPerms: openPerms }
 
   return (
     <div>
-      {/* Search bar */}
       <div style={{ position: 'relative', marginBottom: 14 }}>
         <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: C.textMuted, pointerEvents: 'none' }} />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Filtrar por apelido, navegador ou sistema…"
-          style={{ ...inputBase, paddingLeft: 30, borderRadius: 10, width: '100%', fontSize: 12 }}
-        />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filtrar por apelido, navegador ou sistema…"
+          style={{ ...inputBase, paddingLeft: 30, borderRadius: 10, width: '100%', fontSize: 12 }} />
       </div>
 
       {loading ? (
@@ -3486,7 +3521,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
               <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Bell size={11} /> Aguardando aprovação ({pending.length})
               </div>
-              {pending.map(d => <DeviceRow key={d.token} d={d} />)}
+              {pending.map(d => <DeviceRow key={d.token} d={d} {...rowProps} />)}
             </>
           )}
           {others.length > 0 && (
@@ -3494,7 +3529,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8, marginTop: pending.length > 0 ? 16 : 0 }}>
                 Outros dispositivos ({others.length})
               </div>
-              {others.map(d => <DeviceRow key={d.token} d={d} />)}
+              {others.map(d => <DeviceRow key={d.token} d={d} {...rowProps} />)}
             </>
           )}
         </>
@@ -5549,6 +5584,24 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
   const [settingsTab, setSettingsTab]   = useState('config')
   const [apiKey, setApiKey]             = useState('')
 
+  const [pendingDevices, setPendingDevices] = useState(0)
+
+  useEffect(() => {
+    if (!meInfo?.isAdmin) return
+    const check = async () => {
+      try {
+        const r = await apiFetch('/api/auth/devices')
+        if (r.ok) {
+          const list = await r.json()
+          setPendingDevices(list.filter(d => d.status === 'pending').length)
+        }
+      } catch {}
+    }
+    check()
+    const id = setInterval(check, 30000)
+    return () => clearInterval(id)
+  }, [meInfo?.isAdmin])
+
   const openSettings = useCallback((t = 'config') => { setSettingsTab(t); setSettingsOpen(true) }, [])
 
   const handleSaveSettings = cfg => {
@@ -5650,6 +5703,31 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
         meInfo={meInfo || { apelido: '', isAdmin: false }}
         onUpdateEnv={onUpdateEnv}
       />
+      {meInfo?.isAdmin && pendingDevices > 0 && (
+        <button
+          onClick={() => openSettings('devices')}
+          style={{
+            position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 300, display: 'flex', alignItems: 'center', gap: 8,
+            background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)',
+            border: `1px solid ${C.primaryBright}60`, borderRadius: 99,
+            padding: '10px 18px', cursor: 'pointer',
+            boxShadow: `0 4px 24px rgba(0,0,0,0.8), 0 0 0 1px ${C.primaryBright}20`,
+            animation: 'pulse-border 2s infinite',
+          }}
+        >
+          <div style={{
+            width: 20, height: 20, borderRadius: '50%', background: C.primaryLight,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+            <Globe size={11} color="#fff" />
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+            {pendingDevices} dispositivo{pendingDevices !== 1 ? 's' : ''} aguardando aprovação
+          </span>
+          <span style={{ fontSize: 11, color: C.textMuted }}>→ Gerenciar</span>
+        </button>
+      )}
       <FloatingChat tutores={tutores} setTutores={setTutores} apiKey={apiKey} />
     </div>
   )
