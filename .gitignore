@@ -1,4 +1,5 @@
 .env
+.env.production
 server-data/
 node_modules/
 dist/

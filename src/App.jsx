@@ -150,10 +150,12 @@ const SERVERS = [
   { id: 'grimoria-4', name: 'Grimoria IV',  roman: 'IV',  color: '#ec4899' },
 ]
 
+const API = import.meta.env.VITE_API_URL || ''
+
 function apiFetch(url, opts = {}) {
   const token  = getToken()
   const server = getServer()
-  return fetch(url, {
+  return fetch(API + url, {
     ...opts,
     headers: {
       ...(opts.headers || {}),
@@ -4240,7 +4242,7 @@ function LoginScreen({ onLogin }) {
     if (!password) return
     setLoading(true); setError('')
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(API + '/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, deviceToken: getDeviceToken() }),
@@ -4325,7 +4327,7 @@ function AuthGate() {
     if (!deviceToken) { setStatus('request-access'); return }
 
     try {
-      const r = await fetch('/api/auth/device-status', {
+      const r = await fetch(API + '/api/auth/device-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceToken }),
@@ -4335,7 +4337,7 @@ function AuthGate() {
       if (ds === 'approved') {
         const authToken = getToken()
         if (!authToken) { setStatus('login'); return }
-        const vr = await fetch('/api/auth/verify', { headers: { 'x-auth-token': authToken } })
+        const vr = await fetch(API + '/api/auth/verify', { headers: { 'x-auth-token': authToken } })
         setStatus(vr.ok ? (getServer() ? 'ok' : 'server-select') : 'login')
       } else if (ds === 'pending') {
         setStatus('awaiting')
@@ -4359,7 +4361,7 @@ function AuthGate() {
       saveDeviceToken(deviceToken)
     }
     try {
-      const r = await fetch('/api/auth/request-access', {
+      const r = await fetch(API + '/api/auth/request-access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceToken, info: getDeviceInfo() }),
