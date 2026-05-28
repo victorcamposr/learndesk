@@ -22,6 +22,5 @@ jobs:
           script: |
             cd /home/campin/Rubinot
             git pull origin main
-            npm install --omit=dev
             pm2 restart rubinot
             pm2 save
