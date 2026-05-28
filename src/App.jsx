@@ -14,7 +14,11 @@ import {
   CalendarCheck, CalendarPlus, Bell, Settings, Bot, Send, Mail,
   Globe, Rocket, ArrowLeftRight, LayoutGrid, List,
   Lock, LockOpen, Key, Crown, Palette, Swords, Download,
+  Flame, Zap, Star, Gem,
 } from 'lucide-react'
+
+const SERVER_ICON_MAP = { globe: Globe, swords: Swords, shield: Shield, crown: Crown, flame: Flame, zap: Zap, star: Star, gem: Gem, sparkles: Sparkles, moon: Moon }
+const SERVER_ICON_LIST = ['globe','swords','shield','crown','flame','zap','star','gem','sparkles','moon']
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
@@ -3245,14 +3249,23 @@ function DashboardRow({ t }) {
 }
 
 // ── DevicesPanel ──────────────────────────────────────────────────────────────
-function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmin,
-  editingPermsToken, editAllowed, onToggleWorld, onSavePerms, onCancelPerms, savingPerm, onOpenPerms }) {
+function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmin, onSavePerms }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [expanded, setExpanded]           = useState(false)
+  const [savingWorlds, setSavingWorlds]   = useState(false)
 
-  const isAdmin   = d.apelido && adminApelidos.includes(d.apelido)
   const perm      = permissions[d.token] || {}
-  const isEditing = editingPermsToken === d.token
+  const isAdmin   = d.apelido && adminApelidos.some(a => a.toLowerCase() === d.apelido.toLowerCase())
+  const [localAllowed, setLocalAllowed]   = useState(perm.allowedServers || [])
+
+  useEffect(() => { setLocalAllowed(perm.allowedServers || []) }, [JSON.stringify(perm.allowedServers)])
+
+  const toggleWorld = id => setLocalAllowed(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  const saveWorlds = async () => {
+    setSavingWorlds(true)
+    await onSavePerms(d.token, localAllowed)
+    setSavingWorlds(false)
+  }
 
   const statusColor = { approved: '#10b981', pending: C.gold, denied: '#ef4444' }
   const statusLabel = { approved: 'Aprovado', pending: 'Pendente', denied: 'Negado' }
@@ -3338,60 +3351,50 @@ function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmi
       {/* Permissões (só aprovados com apelido) */}
       {d.apelido && d.status === 'approved' && (
         <div style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: isEditing ? 10 : 0 }}>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em' }}>Acesso</span>
-              {isAdmin
-                ? <span style={{ fontSize: 11, color: C.primaryBright }}>Administrador total</span>
-                : perm.allowedServers?.length > 0
-                  ? <span style={{ fontSize: 11, color: C.teal }}>{perm.allowedServers.length} mundo{perm.allowedServers.length !== 1 ? 's' : ''} permitido{perm.allowedServers.length !== 1 ? 's' : ''}</span>
-                  : <span style={{ fontSize: 11, color: C.textSoft }}>Todos os mundos</span>
-              }
+          {/* Admin switch */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: !isAdmin ? 12 : 0 }}>
+            <div>
+              <span style={{ fontSize: 12, color: C.text }}>Administrador</span>
+              {isAdmin && <span style={{ fontSize: 11, color: C.primaryBright, marginLeft: 8 }}>— acesso total</span>}
+              {!isAdmin && perm.allowedServers?.length > 0 && <span style={{ fontSize: 11, color: C.teal, marginLeft: 8 }}>— {perm.allowedServers.length} mundo{perm.allowedServers.length !== 1 ? 's' : ''}</span>}
+              {!isAdmin && !perm.allowedServers?.length && <span style={{ fontSize: 11, color: C.textSoft, marginLeft: 8 }}>— Sênior (todos)</span>}
             </div>
-            {!isEditing && (
-              <button style={{ ...btn('ghost', 'sm'), fontSize: 10 }} onClick={() => onOpenPerms(d.token, perm.allowedServers || [])}>
-                Editar
-              </button>
-            )}
+            <button onClick={() => onToggleAdmin(d.apelido, isAdmin)} style={{
+              width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+              background: isAdmin ? `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})` : 'rgba(255,255,255,0.12)',
+              position: 'relative', flexShrink: 0, transition: 'background .2s',
+              boxShadow: isAdmin ? `0 0 10px ${C.primaryBright}60` : 'none',
+            }}>
+              <span style={{
+                position: 'absolute', top: 3, left: isAdmin ? 23 : 3,
+                width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                transition: 'left .2s', boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+              }} />
+            </button>
           </div>
 
-          {isEditing && (
+          {/* Mundos — apenas quando não é admin */}
+          {!isAdmin && (
             <>
-              {/* Admin toggle */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <span style={{ fontSize: 12, color: C.text }}>Administrador</span>
-                <button style={{ ...btn(isAdmin ? 'primary' : 'ghost', 'sm'), minWidth: 76 }} onClick={() => onToggleAdmin(d.apelido, isAdmin)}>
-                  {isAdmin ? 'Remover' : 'Conceder'}
+              <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>Mundos permitidos — vazio = todos:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                {(servers || SERVERS).map(s => {
+                  const checked = localAllowed.includes(s.id)
+                  return (
+                    <button key={s.id} onClick={() => toggleWorld(s.id)} style={{
+                      fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+                      background: checked ? `${s.color}22` : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${checked ? s.color + '80' : C.border}`,
+                      color: checked ? s.color : C.textMuted, fontWeight: checked ? 700 : 400,
+                    }}>{s.name}</button>
+                  )
+                })}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={saveWorlds} disabled={savingWorlds} style={{ ...btn('teal', 'sm'), opacity: savingWorlds ? 0.6 : 1 }}>
+                  {savingWorlds ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={11} />} Salvar
                 </button>
               </div>
-
-              {/* Mundos (só se não admin) */}
-              {!isAdmin && (
-                <>
-                  <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>Mundos permitidos — vazio = todos:</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                    {(servers || SERVERS).map(s => {
-                      const checked = editAllowed.includes(s.id)
-                      return (
-                        <button key={s.id} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer', background: checked ? `${s.color}22` : 'rgba(255,255,255,0.03)', border: `1px solid ${checked ? s.color + '80' : C.border}`, color: checked ? s.color : C.textMuted, fontWeight: checked ? 700 : 400 }} onClick={() => onToggleWorld(s.id)}>
-                          {s.name}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button style={btn('ghost', 'sm')} onClick={onCancelPerms}><X size={11} /> Cancelar</button>
-                    <button style={{ ...btn('teal', 'sm'), opacity: savingPerm ? 0.6 : 1 }} disabled={savingPerm} onClick={() => onSavePerms(d.token)}>
-                      {savingPerm ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={11} />} Salvar
-                    </button>
-                  </div>
-                </>
-              )}
-              {isAdmin && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button style={btn('ghost', 'sm')} onClick={onCancelPerms}><X size={11} /> Fechar</button>
-                </div>
-              )}
             </>
           )}
         </div>
@@ -3440,9 +3443,6 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const [permissions, setPerms]             = useState({})
   const [loading, setLoading]               = useState(false)
   const [search, setSearch]                 = useState('')
-  const [editingPermsToken, setEditingPermsToken] = useState(null)
-  const [editAllowed, setEditAllowed]       = useState([])
-  const [savingPerm, setSavingPerm]         = useState(false)
   const [statusFilter, setStatusFilter]     = useState('all')
 
   const load = useCallback(async () => {
@@ -3475,20 +3475,13 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
     load()
   }
 
-  const handleSavePerms = async token => {
-    setSavingPerm(true)
+  const handleSavePerms = async (token, allowedServers) => {
     await apiFetch(`/api/auth/devices/${token}/permissions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role: 'senior', allowedServers: editAllowed.length > 0 ? editAllowed : null }),
+      body: JSON.stringify({ role: 'senior', allowedServers: allowedServers.length > 0 ? allowedServers : null }),
     })
-    setSavingPerm(false)
-    setEditingPermsToken(null)
     load()
   }
-
-  const openPerms = (token, allowed) => { setEditingPermsToken(token); setEditAllowed(allowed) }
-  const cancelPerms = () => setEditingPermsToken(null)
-  const toggleWorld = id => setEditAllowed(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
 
   const q = search.trim().toLowerCase()
   const filtered = devices.filter(d => {
@@ -3498,7 +3491,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const pending = filtered.filter(d => d.status === 'pending')
   const others  = filtered.filter(d => d.status !== 'pending')
 
-  const rowProps = { adminApelidos, permissions, servers, onAct: act, onToggleAdmin: toggleAdmin, editingPermsToken, editAllowed, onToggleWorld: toggleWorld, onSavePerms: handleSavePerms, onCancelPerms: cancelPerms, savingPerm, onOpenPerms: openPerms }
+  const rowProps = { adminApelidos, permissions, servers, onAct: act, onToggleAdmin: toggleAdmin, onSavePerms: handleSavePerms }
 
   return (
     <div>
@@ -3594,9 +3587,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
           { key: 'mundos',   label: 'Mundos',         icon: Swords },
           { key: 'devices',  label: 'Dispositivos',   icon: Globe },
         ]
-        const allTabs = meInfo?.isAdmin
-          ? [...baseTabs, { key: 'admin', label: 'Admin', icon: Crown }]
-          : baseTabs
+        const allTabs = baseTabs
         return (
           <div style={{ display: 'flex', gap: 6, marginBottom: 20, borderBottom: `1px solid ${C.border}`, paddingBottom: 12, flexWrap: 'wrap' }}>
             {allTabs.map(({ key, label, icon: Icon }) => (
@@ -3616,9 +3607,8 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
       })()}
 
       {tab === 'devices' ? <DevicesPanel servers={servers} meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> :
-       tab === 'ambiente' ? <EnvConfigPanel servers={servers} envConfigs={envConfigs} onUpdateEnv={onUpdateEnv} canRename={meInfo?.role !== 'senior'} /> :
-       tab === 'mundos'   ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> :
-       tab === 'admin'    ? <AdminPanel meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> : (
+       tab === 'ambiente' ? <EnvConfigPanel servers={servers} envConfigs={envConfigs} onUpdateEnv={onUpdateEnv} canRename={meInfo?.role !== 'senior'} meInfo={meInfo} /> :
+       tab === 'mundos'   ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> : (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
         {/* Toggle atividade automática */}
@@ -3705,7 +3695,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
 }
 
 // ── EnvConfigPanel ────────────────────────────────────────────────────────────
-function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) {
+function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true, meInfo }) {
   const serverId = getServer()
   const srv = (servers || SERVERS).find(s => s.id === serverId) || {}
   const cfg = envConfigs?.[serverId] || {}
@@ -3717,6 +3707,10 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) 
   const [showPwd, setShowPwd]   = useState(false)
   const [saving, setSaving]     = useState(false)
   const [toast, setToast]       = useState('')
+  const [masterPwd, setMasterPwd]   = useState('')
+  const [masterPwd2, setMasterPwd2] = useState('')
+  const [showMaster, setShowMaster] = useState(false)
+  const [savingMaster, setSavingMaster] = useState(false)
 
   useEffect(() => {
     setName(cfg.customName || srv.name || '')
@@ -3726,6 +3720,17 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) 
   }, [serverId, cfg.customName, cfg.locked, srv.name])
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500) }
+
+  const handleSaveMaster = async () => {
+    if (masterPwd.length < 6) { showToast('Mínimo 6 caracteres'); return }
+    if (masterPwd !== masterPwd2) { showToast('As senhas não coincidem'); return }
+    setSavingMaster(true)
+    try {
+      const r = await apiFetch('/api/admin/master-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: masterPwd }) })
+      r.ok ? showToast('Senha mestre atualizada!') : showToast('Erro ao salvar')
+    } catch { showToast('Erro de conexão') }
+    finally { setSavingMaster(false); setMasterPwd(''); setMasterPwd2('') }
+  }
 
   const handleSave = async () => {
     if (password && password !== password2) { showToast('As senhas não coincidem'); return }
@@ -3828,9 +3833,6 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) 
                 />
               </div>
             )}
-            <div style={{ fontSize: 11, color: C.textMuted }}>
-              A senha mestre também libera acesso a qualquer ambiente.
-            </div>
           </div>
         )}
       </div>
@@ -3838,6 +3840,32 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) 
       <button onClick={handleSave} disabled={saving} style={{ ...btn('gold'), alignSelf: 'flex-end' }}>
         {saving ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Salvando...</> : <><Save size={13} /> Salvar</>}
       </button>
+
+      {/* Senha mestre — apenas admin */}
+      {meInfo?.isAdmin && (
+        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 18, marginTop: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Key size={12} /> Senha Mestre Global
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ position: 'relative' }}>
+              <input type={showMaster ? 'text' : 'password'} value={masterPwd} onChange={e => setMasterPwd(e.target.value)}
+                style={{ ...inputBase, paddingRight: 40 }} placeholder="Nova senha mestre (mín. 6 chars)" maxLength={128} />
+              <button type="button" onClick={() => setShowMaster(v => !v)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted }}>
+                {showMaster ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
+            {masterPwd && (
+              <input type={showMaster ? 'text' : 'password'} value={masterPwd2} onChange={e => setMasterPwd2(e.target.value)}
+                style={{ ...inputBase, border: masterPwd2 && masterPwd !== masterPwd2 ? '1px solid #ef444460' : `1px solid ${C.border}` }}
+                placeholder="Confirmar nova senha mestre" maxLength={128} />
+            )}
+            <button onClick={handleSaveMaster} disabled={!masterPwd || savingMaster} style={{ ...btn('gold', 'sm'), alignSelf: 'flex-start', opacity: !masterPwd ? 0.5 : 1 }}>
+              <Save size={12} /> Salvar Senha Mestre
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -3849,12 +3877,14 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
   const [adding, setAdding]       = useState(false)
   const [newName, setNewName]     = useState('')
   const [newColor, setNewColor]   = useState(ENV_COLORS[0])
+  const [newIcon, setNewIcon]     = useState('globe')
   const [saving, setSaving]       = useState(false)
   const [toast, setToast]         = useState('')
   const [confirmDel, setConfirmDel] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editName, setEditName]   = useState('')
   const [editColor, setEditColor] = useState('')
+  const [editIcon, setEditIcon]   = useState('globe')
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500) }
 
@@ -3866,7 +3896,7 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
   const handleAdd = async () => {
     if (!newName.trim()) return
     setSaving(true)
-    const newEnv = { id: genId(newName), name: newName.trim(), color: newColor }
+    const newEnv = { id: genId(newName), name: newName.trim(), color: newColor, icon: newIcon }
     const updated = [...list, newEnv]
     try {
       const r = await apiFetch('/api/env/list', {
@@ -3877,7 +3907,7 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
       if (r.ok) {
         await onUpdateEnv?.()
         showToast(`"${newName}" criado!`)
-        setAdding(false); setNewName(''); setNewColor(ENV_COLORS[0])
+        setAdding(false); setNewName(''); setNewColor(ENV_COLORS[0]); setNewIcon('globe')
       } else {
         const e = await r.json()
         showToast(e.error || 'Erro ao criar')
@@ -3902,12 +3932,12 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
     finally { setSaving(false); setConfirmDel(null) }
   }
 
-  const startEdit = s => { setEditingId(s.id); setEditName(s.name); setEditColor(s.color) }
+  const startEdit = s => { setEditingId(s.id); setEditName(s.name); setEditColor(s.color); setEditIcon(s.icon || 'globe') }
 
   const handleEditSave = async id => {
     if (!editName.trim()) return
     setSaving(true)
-    const updated = list.map(s => s.id === id ? { ...s, name: editName.trim(), color: editColor } : s)
+    const updated = list.map(s => s.id === id ? { ...s, name: editName.trim(), color: editColor, icon: editIcon } : s)
     try {
       const r = await apiFetch('/api/env/list', {
         method: 'POST',
@@ -3953,6 +3983,18 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
                   ))}
                 </div>
               </div>
+              <div>
+                <label style={labelStyle}><Sparkles size={11} /> Ícone</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {SERVER_ICON_LIST.map(ic => { const Ic = SERVER_ICON_MAP[ic]; return (
+                    <button key={ic} onClick={() => setEditIcon(ic)} style={{
+                      width: 32, height: 32, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: editIcon === ic ? `${editColor}22` : 'rgba(255,255,255,0.03)',
+                      border: `2px solid ${editIcon === ic ? editColor + '80' : C.border}`,
+                    }}><Ic size={15} color={editIcon === ic ? editColor : C.textMuted} /></button>
+                  )})}
+                </div>
+              </div>
               <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                 <button onClick={() => setEditingId(null)} style={btn('ghost', 'sm')}><X size={12} /> Cancelar</button>
                 <button onClick={() => handleEditSave(s.id)} disabled={!editName.trim() || saving} style={{ ...btn('gold', 'sm'), opacity: !editName.trim() ? 0.5 : 1 }}>
@@ -3967,7 +4009,7 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
             background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`,
             borderRadius: 10, padding: '10px 14px',
           }}>
-            <div style={{ width: 12, height: 12, borderRadius: 3, background: s.color, flexShrink: 0 }} />
+            {(() => { const Ic = SERVER_ICON_MAP[s.icon || 'globe'] || Globe; return <Ic size={14} color={s.color} style={{ flexShrink: 0 }} /> })()}
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{s.name}</div>
               <div style={{ fontSize: 10, color: C.textMuted }}>{s.id}</div>
@@ -4023,6 +4065,18 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
                     cursor: 'pointer', transition: 'transform .1s', transform: newColor === c ? 'scale(1.2)' : 'none',
                   }} />
                 ))}
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}><Sparkles size={11} /> Ícone</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {SERVER_ICON_LIST.map(ic => { const Ic = SERVER_ICON_MAP[ic]; return (
+                  <button key={ic} onClick={() => setNewIcon(ic)} style={{
+                    width: 32, height: 32, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: newIcon === ic ? `${newColor}22` : 'rgba(255,255,255,0.03)',
+                    border: `2px solid ${newIcon === ic ? newColor + '80' : C.border}`,
+                  }}><Ic size={15} color={newIcon === ic ? newColor : C.textMuted} /></button>
+                )})}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -4954,7 +5008,7 @@ function EnvPasswordScreen({ server, onSuccess, onBack }) {
         body: JSON.stringify({ serverId: server.id, password }),
       })
       if (r.ok) {
-        sessionStorage.setItem(`env_unlocked:${server.id}`, '1')
+        // sem cache — senha sempre pedida ao trocar de servidor
         onSuccess()
       } else {
         setError('Senha incorreta')
@@ -5045,7 +5099,7 @@ function ServerSelectScreen({ onSelect, servers: serverList, envConfigs, allowed
       <BackgroundImage />
       <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: list.length > 4 ? 680 : 520, padding: '0 20px' }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <img src={`${BASE}files/logo.webp`} alt="Rubinot" style={{ width: 100, height: 100, objectFit: 'contain', display: 'block', margin: '0 auto 14px', filter: 'drop-shadow(0 0 20px rgba(99,102,241,0.55))' }} onError={e => { e.target.style.display = 'none' }} />
+          <img src={`${BASE}files/logo.webp`} alt="Rubinot" style={{ width: 150, height: 150, objectFit: 'contain', display: 'block', margin: '0 auto 14px', filter: 'drop-shadow(0 0 40px rgba(99,102,241,0.9)) drop-shadow(0 0 80px rgba(99,102,241,0.4))' }} onError={e => { e.target.style.display = 'none' }} />
           <h2 style={{ fontFamily: 'Cinzel, serif', color: C.text, fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Selecionar Servidor</h2>
           <p style={{ color: C.textMuted, fontSize: 13 }}>Escolha qual servidor deseja gerenciar nesta sessão</p>
         </div>
@@ -5086,9 +5140,8 @@ function ServerSelectScreen({ onSelect, servers: serverList, envConfigs, allowed
                   width: 52, height: 52, borderRadius: 13,
                   background: `${s.color}1a`, border: `1px solid ${s.color}45`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 17, fontWeight: 800, color: s.color, fontFamily: 'Cinzel, serif',
                 }}>
-                  {initial}
+                  {(() => { const Ic = SERVER_ICON_MAP[s.icon || 'globe'] || Globe; return <Ic size={24} color={s.color} /> })()}
                 </div>
                 <span style={{ fontFamily: 'Cinzel, serif', fontWeight: 700, color: C.text, fontSize: 15 }}>{label}</span>
               </button>
@@ -5420,7 +5473,14 @@ function AuthGate() {
   const [envConfigs, setEnvConfigs]     = useState({})
   const [meInfo, setMeInfo]             = useState({ apelido: '', isAdmin: false })
   const [pendingServer, setPendingServer] = useState(null)
+  const [adminSkipMsg, setAdminSkipMsg] = useState('')
   const wasAwaitingRef                  = useRef(false)
+
+  useEffect(() => {
+    if (!adminSkipMsg) return
+    const t = setTimeout(() => setAdminSkipMsg(''), 3500)
+    return () => clearTimeout(t)
+  }, [adminSkipMsg])
 
   const loadEnvData = useCallback(async () => {
     try {
@@ -5491,8 +5551,7 @@ function AuthGate() {
           localStorage.setItem(DENIED_AT_KEY, Date.now().toString())
         setStatus('denied')
       } else {
-        wasAwaitingRef.current = true
-        setStatus('awaiting')
+        setStatus('request-access')
       }
     } catch {
       setStatus(getDeviceToken() ? 'awaiting' : 'request-access')
@@ -5531,8 +5590,11 @@ function AuthGate() {
     if (allowed && !allowed.includes(id)) return
     const cfg = envConfigs[id] || {}
     const locked = cfg.locked && cfg.hasPassword
-    const alreadyUnlocked = sessionStorage.getItem(`env_unlocked:${id}`)
-    if (locked && !alreadyUnlocked) {
+    if (meInfo?.isAdmin) {
+      saveServer(id)
+      setStatus('ok')
+      if (locked) setAdminSkipMsg('Acesso de administrador — senha do servidor ignorada')
+    } else if (locked) {
       setPendingServer(id)
       setStatus('env-locked')
     } else {
@@ -5540,6 +5602,12 @@ function AuthGate() {
       setStatus('ok')
     }
   }
+
+  useEffect(() => {
+    if (status !== 'server-select') return
+    const allowed = meInfo?.allowedServers
+    if (!meInfo?.isAdmin && allowed?.length === 1) handleSelectServer(allowed[0])
+  }, [status, meInfo])
 
   const handleEnvUnlocked = () => {
     saveServer(pendingServer)
@@ -5576,14 +5644,27 @@ function AuthGate() {
     />
   )
   return (
-    <App
-      key={getServer()}
-      onChangeServer={() => setStatus('server-select')}
-      servers={servers}
-      envConfigs={envConfigs}
-      meInfo={meInfo}
-      onUpdateEnv={handleUpdateEnv}
-    />
+    <>
+      {adminSkipMsg && (
+        <div style={{
+          position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 9999, background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)',
+          border: `1px solid ${C.gold}50`, borderRadius: 99, padding: '10px 18px',
+          fontSize: 12, color: C.gold, display: 'flex', alignItems: 'center', gap: 8,
+          boxShadow: `0 4px 24px rgba(0,0,0,0.6)`, pointerEvents: 'none',
+        }}>
+          <Crown size={13} /> {adminSkipMsg}
+        </div>
+      )}
+      <App
+        key={getServer()}
+        onChangeServer={() => setStatus('server-select')}
+        servers={servers}
+        envConfigs={envConfigs}
+        meInfo={meInfo}
+        onUpdateEnv={handleUpdateEnv}
+      />
+    </>
   )
 }
 
