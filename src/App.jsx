@@ -3132,7 +3132,12 @@ function DevicesPanel() {
           <Globe size={14} color={statusColor[d.status]} />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>
+          {d.apelido && (
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.gold, marginBottom: 1 }}>
+              {d.apelido}
+            </div>
+          )}
+          <div style={{ fontSize: d.apelido ? 11 : 13, fontWeight: d.apelido ? 400 : 700, color: d.apelido ? C.textMuted : C.text }}>
             {d.browser || '?'} · {d.os || '?'}
           </div>
           <div style={{ fontSize: 11, color: C.textMuted }}>
@@ -4075,25 +4080,25 @@ function ServerSelectScreen({ onSelect }) {
 // ── Login ─────────────────────────────────────────────────────────────────────
 // ── Telas de dispositivo ──────────────────────────────────────────────────────
 function DeviceRequestScreen({ onRequest }) {
-  const [loading, setLoading]   = useState(false)
-  const [location, setLocation] = useState('Carregando...')
+  const [loading, setLoading] = useState(false)
+  const [apelido, setApelido] = useState('')
+  const [geo, setGeo]         = useState(null)
   const info = getDeviceInfo()
 
   useEffect(() => {
     apiFetch('/api/geo')
       .then(r => r.json())
-      .then(d => {
-        if (d.status === 'success')
-          setLocation([d.city, d.regionName, d.country].filter(Boolean).join(', '))
-        else
-          setLocation('Não identificada')
-      })
-      .catch(() => setLocation('Não identificada'))
+      .then(d => { if (d.status === 'success') setGeo(d) })
+      .catch(() => {})
   }, [])
+
+  const location = geo ? [geo.city, geo.regionName, geo.country].filter(Boolean).join(', ') : 'Carregando...'
+  const isp      = geo?.isp || null
+  const ip       = geo?.query || null
 
   const handle = async () => {
     setLoading(true)
-    await onRequest()
+    await onRequest(apelido.trim())
     setLoading(false)
   }
 
@@ -4101,13 +4106,13 @@ function DeviceRequestScreen({ onRequest }) {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
       <BackgroundImage />
       <BackgroundOrbs />
-      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 400, padding: '0 16px' }}>
+      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 420, padding: '0 16px' }}>
         <div style={{
           background: C.card, border: `1px solid ${C.borderLight}`, borderRadius: 20,
           padding: '40px 32px', backdropFilter: 'blur(20px)',
           boxShadow: '0 8px 48px rgba(0,0,0,0.6)',
         }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 28 }}>
             <img src={`${BASE}files/logo.webp`} alt="Rubinot" style={{ width: 100, height: 100, objectFit: 'contain', marginBottom: 16, filter: 'drop-shadow(0 0 18px rgba(99,102,241,0.5))' }} />
             <div style={{ fontSize: 18, fontWeight: 700, color: C.text, fontFamily: 'Cinzel, serif', marginBottom: 6 }}>
               Acesso Restrito
@@ -4117,21 +4122,36 @@ function DeviceRequestScreen({ onRequest }) {
             </div>
           </div>
 
+          {/* Apelido */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}><User size={11} /> Apelido (como quer ser identificado)</label>
+            <input
+              style={{ ...inputBase, fontSize: 14 }}
+              value={apelido}
+              onChange={e => setApelido(e.target.value)}
+              placeholder="Ex: Victor — PC Casa"
+              maxLength={40}
+            />
+          </div>
+
+          {/* Info do dispositivo */}
           <div style={{ background: 'rgba(99,102,241,0.07)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', marginBottom: 24 }}>
             <div style={{ fontSize: 10, color: C.primaryBright, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10 }}>
               Informações deste dispositivo
             </div>
             {[
-              ['Navegador',  info.browser],
-              ['Sistema',    info.os],
-              ['Resolução',  info.screen],
+              ['Navegador',   info.browser],
+              ['Sistema',     info.os],
+              ['Resolução',   info.screen],
               ['Localização', location],
-            ].map(([label, val]) => (
+              ['Provedor',    isp],
+              ['IP',          ip],
+            ].map(([label, val]) => val ? (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
                 <span style={{ color: C.textMuted }}>{label}</span>
-                <span style={{ color: label === 'Localização' ? C.primaryBright : C.text, fontWeight: 600 }}>{val}</span>
+                <span style={{ color: label === 'Localização' ? C.primaryBright : label === 'IP' ? C.teal : C.text, fontWeight: 600 }}>{val}</span>
               </div>
-            ))}
+            ) : null)}
           </div>
 
           <button onClick={handle} disabled={loading} style={{
@@ -4355,7 +4375,7 @@ function AuthGate() {
 
   useEffect(() => { checkDevice() }, [checkDevice])
 
-  const handleRequestAccess = async () => {
+  const handleRequestAccess = async (apelido = '') => {
     let deviceToken = getDeviceToken()
     if (!deviceToken) {
       deviceToken = genDeviceToken()
@@ -4365,7 +4385,7 @@ function AuthGate() {
       const r = await fetch(API + '/api/auth/request-access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceToken, info: getDeviceInfo() }),
+        body: JSON.stringify({ deviceToken, apelido, info: getDeviceInfo() }),
       })
       const { status: ds } = await r.json()
       setStatus(ds === 'approved' ? 'login' : 'awaiting')

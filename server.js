@@ -249,6 +249,7 @@ app.post('/api/auth/request-access', async (req, res) => {
     return res.json({ status: devices[deviceToken].status })
 
   const isFirst = Object.keys(devices).length === 0
+  const apelido = req.body.apelido && typeof req.body.apelido === 'string' ? req.body.apelido.slice(0, 40).trim() : ''
   const s = (typeof info === 'object' && info !== null) ? info : {}
   const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim()
 
@@ -257,6 +258,7 @@ app.post('/api/auth/request-access', async (req, res) => {
   devices[deviceToken] = {
     status:      isFirst ? 'approved' : 'pending',
     requestedAt: new Date().toISOString(),
+    apelido:     apelido || '',
     ip,
     geo,
     userAgent:   (req.headers['user-agent'] || '').slice(0, 200),
@@ -326,8 +328,8 @@ app.get('/api/geo', async (req, res) => {
     const ip = raw.replace('::ffff:', '')
     const isLocal = !ip || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168') || ip.startsWith('10.')
     const url = isLocal
-      ? 'http://ip-api.com/json/?fields=status,city,regionName,country&lang=pt-BR'
-      : `http://ip-api.com/json/${ip}?fields=status,city,regionName,country&lang=pt-BR`
+      ? 'http://ip-api.com/json/?fields=status,city,regionName,country,isp,query&lang=pt-BR'
+      : `http://ip-api.com/json/${ip}?fields=status,city,regionName,country,isp,query&lang=pt-BR`
     const r = await fetch(url)
     const d = await r.json()
     res.json(d)
