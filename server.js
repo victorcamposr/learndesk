@@ -181,7 +181,7 @@ const saveAnalysesFor = (req, data) => writeFileSync(serverAnalysesFile(req), JS
 
 const app = express()
 app.use(helmet())
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173', 'https://victorcamposr.github.io'] }))
+app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173', 'https://victorcamposr.github.io', 'https://backendcampin.duckdns.org'] }))
 app.use(express.json({ limit: '1mb' }))
 
 const loginLimiter = rateLimit({
