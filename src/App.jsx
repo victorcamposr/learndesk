@@ -4080,7 +4080,7 @@ function DeviceRequestScreen({ onRequest }) {
   const info = getDeviceInfo()
 
   useEffect(() => {
-    fetch('http://ip-api.com/json/?fields=status,city,regionName,country&lang=pt-BR')
+    fetch('https://ip-api.com/json/?fields=status,city,regionName,country&lang=pt-BR')
       .then(r => r.json())
       .then(d => {
         if (d.status === 'success')
