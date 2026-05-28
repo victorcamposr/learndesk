@@ -320,9 +320,15 @@ app.post('/api/auth/devices/deny', requireAuth, (req, res) => {
 })
 
 // ── Geo (pública, usada pelo frontend no registro de dispositivo) ──────────────
-app.get('/api/geo', async (_req, res) => {
+app.get('/api/geo', async (req, res) => {
   try {
-    const r = await fetch('http://ip-api.com/json/?fields=status,city,regionName,country&lang=pt-BR')
+    const raw = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim()
+    const ip = raw.replace('::ffff:', '')
+    const isLocal = !ip || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('192.168') || ip.startsWith('10.')
+    const url = isLocal
+      ? 'http://ip-api.com/json/?fields=status,city,regionName,country&lang=pt-BR'
+      : `http://ip-api.com/json/${ip}?fields=status,city,regionName,country&lang=pt-BR`
+    const r = await fetch(url)
     const d = await r.json()
     res.json(d)
   } catch {

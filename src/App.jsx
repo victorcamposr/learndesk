@@ -4345,11 +4345,11 @@ function AuthGate() {
       } else if (ds === 'denied') {
         setStatus('denied')
       } else {
-        localStorage.removeItem(DEVICE_KEY)
-        setStatus('request-access')
+        // token existe mas servidor não reconhece (ex: reiniciou) — mantém aguardando
+        setStatus('awaiting')
       }
     } catch {
-      setStatus('request-access')
+      setStatus(getDeviceToken() ? 'awaiting' : 'request-access')
     }
   }, [])
 
