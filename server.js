@@ -485,6 +485,6 @@ app.post('/api/analyze', requireAuth, async (req, res) => {
   }
 })
 
-app.listen(3001, () => {
-  console.log('🤖 API Rubinot rodando em http://localhost:3001')
+app.listen(3002, () => {
+  console.log('🤖 API Rubinot rodando em http://localhost:3002')
 })
