@@ -1,0 +1,8 @@
+.env
+server-data/
+node_modules/
+dist/
+.claude/
+*.xlsx
+verify_button.cjs
+verify_screenshots/
