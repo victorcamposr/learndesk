@@ -64,7 +64,7 @@ const getValidServers = () => getEnvList().map(e => e.id)
 
 const getAdminApelidos = () => {
   const saved = getKV('admin_apelidos') || []
-  return saved.includes('campin') ? saved : ['campin', ...saved]
+  return saved.some(a => a.toLowerCase() === 'campin') ? saved : ['campin', ...saved]
 }
 const getDevicePerms   = () => getKV('device_permissions') || {}
 const setDevicePerms   = p  => setKV('device_permissions', p)
@@ -75,7 +75,8 @@ const getDeviceApelido = req => {
 }
 const isAdminReq = req => {
   const ap = getDeviceApelido(req)
-  return ap ? getAdminApelidos().includes(ap) : false
+  if (!ap) return false
+  return getAdminApelidos().some(a => a.toLowerCase() === ap.toLowerCase())
 }
 const requireAdmin = (req, res, next) => {
   if (!isAdminReq(req)) return res.status(403).json({ error: 'Acesso negado' })
@@ -576,7 +577,7 @@ app.post('/api/analyze', requireAuth, async (req, res) => {
 app.get('/api/auth/me', requireAuth, (req, res) => {
   const dt      = req.headers['x-device-token']
   const apelido = getDeviceApelido(req) || ''
-  const isAdmin = getAdminApelidos().includes(apelido)
+  const isAdmin = getAdminApelidos().some(a => a.toLowerCase() === apelido.toLowerCase())
   const perm    = (dt && getDevicePerms()[dt]) || {}
   const allowedServers = isAdmin ? null : (perm.allowedServers || null)
   res.json({ apelido, isAdmin, role: perm.role || 'senior', allowedServers })

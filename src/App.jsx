@@ -3443,6 +3443,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const [editingPermsToken, setEditingPermsToken] = useState(null)
   const [editAllowed, setEditAllowed]       = useState([])
   const [savingPerm, setSavingPerm]         = useState(false)
+  const [statusFilter, setStatusFilter]     = useState('all')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -3490,9 +3491,10 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const toggleWorld = id => setEditAllowed(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
 
   const q = search.trim().toLowerCase()
-  const filtered = devices.filter(d =>
-    !q || (d.apelido || '').toLowerCase().includes(q) || (d.browser || '').toLowerCase().includes(q) || (d.os || '').toLowerCase().includes(q)
-  )
+  const filtered = devices.filter(d => {
+    if (statusFilter !== 'all' && d.status !== statusFilter) return false
+    return !q || (d.apelido || '').toLowerCase().includes(q) || (d.browser || '').toLowerCase().includes(q) || (d.os || '').toLowerCase().includes(q)
+  })
   const pending = filtered.filter(d => d.status === 'pending')
   const others  = filtered.filter(d => d.status !== 'pending')
 
@@ -3500,10 +3502,20 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
 
   return (
     <div>
-      <div style={{ position: 'relative', marginBottom: 14 }}>
+      <div style={{ position: 'relative', marginBottom: 8 }}>
         <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: C.textMuted, pointerEvents: 'none' }} />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filtrar por apelido, navegador ou sistema…"
           style={{ ...inputBase, paddingLeft: 30, borderRadius: 10, width: '100%', fontSize: 12 }} />
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+        {[['all','Todos'],['pending','Pendentes'],['approved','Aprovados'],['denied','Negados']].map(([val, label]) => (
+          <button key={val} onClick={() => setStatusFilter(val)} style={{
+            fontSize: 11, padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+            background: statusFilter === val ? `${C.primaryBright}22` : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${statusFilter === val ? C.primaryBright + '60' : C.border}`,
+            color: statusFilter === val ? C.primaryBright : C.textMuted, fontWeight: statusFilter === val ? 700 : 400,
+          }}>{label}</button>
+        ))}
       </div>
 
       {loading ? (
@@ -3572,7 +3584,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
     <Modal open={open} onClose={onClose} title="Configurações" icon={Settings} maxWidth={520}>
       {/* Tabs */}
       {(() => {
-        const isSenior = meInfo?.role === 'senior'
+        const isSenior = meInfo?.role === 'senior' && !meInfo?.isAdmin
         const baseTabs = isSenior ? [
           { key: 'config',   label: 'Regras',       icon: Activity },
           { key: 'ambiente', label: 'Ambiente',      icon: Lock },
