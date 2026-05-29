@@ -3705,6 +3705,7 @@ const AUDIT_LABELS = {
   tutor_delete:           { label: 'Tutor removido',         color: '#ef4444' },
   cargo_change:           { label: 'Cargo alterado',         color: '#8b5cf6' },
   presenca_add:           { label: 'Presença adicionada',    color: '#10b981' },
+  presenca_add_todos:     { label: 'Presença em massa',      color: '#10b981' },
   presenca_remove:        { label: 'Presença removida',      color: '#f97316' },
   ausencia_add:           { label: 'Ausência registrada',    color: '#3b82f6' },
   ausencia_remove:        { label: 'Ausência removida',      color: '#10b981' },
@@ -3759,7 +3760,7 @@ function AuditoriaPanel() {
   ]
   const AUTH_ACTIONS    = new Set(['login','logout','password_set'])
   const DEVICE_ACTIONS  = new Set(['device_approve','device_deny','device_delete','device_permissions','ip_revoke'])
-  const TUTOR_ACTIONS   = new Set(['tutores_save','tutor_add','tutor_edit','tutor_delete','cargo_change','presenca_add','presenca_remove','ausencia_add','ausencia_remove','obs_add'])
+  const TUTOR_ACTIONS   = new Set(['tutores_save','tutor_add','tutor_edit','tutor_delete','cargo_change','presenca_add','presenca_add_todos','presenca_remove','ausencia_add','ausencia_remove','obs_add'])
   const ADMIN_ACTIONS   = new Set(['admin_apelidos_update','apikey_update','env_list_update'])
   const SETTINGS_ACTIONS = new Set(['settings_save'])
 

@@ -669,13 +669,17 @@ REGRAS (ordem de prioridade):
       const server = req.headers['x-server'] || '?'
       const ACTION_MAP = {
         add_presenca: 'presenca_add', remove_presenca: 'presenca_remove',
-        add_presenca_todos: 'presenca_add', add_ausencia: 'ausencia_add',
+        add_presenca_todos: 'presenca_add_todos', add_ausencia: 'ausencia_add',
         remove_ausencia: 'ausencia_remove', change_cargo: 'cargo_change',
         add_obs: 'obs_add',
       }
       for (const a of parsed.acoes) {
         const auditAction = ACTION_MAP[a.tipo] || a.tipo
-        addAuditLog(actor, auditAction, { server, nick: a.nick || '(todos)', ...(a.data ? { data: a.data } : {}), ...(a.cargo ? { cargo: a.cargo } : {}), via: 'IA' })
+        const exceto = a.exceto?.length ? ` (exceto: ${a.exceto.join(', ')})` : ''
+        const nick = a.tipo === 'add_presenca_todos'
+          ? `todos${exceto}`
+          : (a.nick || '?')
+        addAuditLog(actor, auditAction, { server, nick, ...(a.data ? { data: a.data } : {}), ...(a.cargo ? { cargo: a.cargo } : {}), via: 'IA' })
       }
     }
 
