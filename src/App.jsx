@@ -820,7 +820,7 @@ const BLANK = {
 }
 const PERIODO_ICONS = { Manhã: Sun, Tarde: Sunset, Noite: Moon }
 
-function TutorForm({ tutores, setTutores, editId, onDone }) {
+function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
   const isEdit = editId !== null
   const [form, setForm]     = useState(BLANK)
   const [errors, setErrors] = useState({})
@@ -852,8 +852,10 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
     if (Object.keys(e).length) { setErrors(e); return }
     const horariosStr = serializeHorarios(form.horariosSemana, form.horariosFDS)
     if (isEdit) {
+      if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_edit', nick: form.nick }
       setTutores(prev => prev.map(t => t.id === editId ? { ...form, id: editId, horarios: horariosStr } : t))
     } else {
+      if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_add', nick: form.nick }
       setTutores(prev => [...prev, { ...form, id: nextId(prev), horarios: horariosStr }])
     }
     onDone()
@@ -1959,7 +1961,7 @@ function ExportModal({ open, onClose, tutores }) {
   )
 }
 
-function CadastroTab({ tutores, setTutores, cfg }) {
+function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
   const [modalOpen, setModalOpen]   = useState(false)
   const [editId, setEditId]         = useState(null)
   const [ausenciaId, setAusenciaId] = useState(null)
@@ -1971,25 +1973,38 @@ function CadastroTab({ tutores, setTutores, cfg }) {
   const [viewMode, setViewMode]     = useState('list')
   const [filterTab, setFilterTab]   = useState('ativos')
 
-  const handleDelete      = id => setTutores(prev => prev.filter(t => t.id !== id))
+  const handleDelete      = id => {
+    const tutor = tutores.find(t => t.id === id)
+    if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_delete', nick: tutor?.nick }
+    setTutores(prev => prev.filter(t => t.id !== id))
+  }
   const handleEdit        = id => { setEditId(id); setModalOpen(true) }
   const handleNew         = ()  => { setEditId(null); setModalOpen(true) }
   const handleClose       = ()  => { setModalOpen(false); setEditId(null) }
-  const handleSaveObs     = (id, text) => setTutores(prev => prev.map(t => t.id === id ? { ...t, obs: text } : t))
+  const handleSaveObs     = (id, text) => {
+    const tutor = tutores.find(t => t.id === id)
+    if (pendingAuditRef) pendingAuditRef.current = { action: 'obs_add', nick: tutor?.nick }
+    setTutores(prev => prev.map(t => t.id === id ? { ...t, obs: text } : t))
+  }
   const handlePresenca    = (id, add) => {
     const hoje = todayStr()
+    const tutor = tutores.find(t => t.id === id)
+    if (pendingAuditRef) pendingAuditRef.current = { action: add ? 'presenca_add' : 'presenca_remove', nick: tutor?.nick, details: { data: hoje } }
     setTutores(prev => prev.map(t => {
       if (t.id !== id) return t
       const presencas = t.presencas || []
       return { ...t, presencas: add ? [...new Set([...presencas, hoje])] : presencas.filter(d => d !== hoje) }
     }))
   }
-  const handleAusencia    = (tutorId, novaAusencia, removeId) =>
+  const handleAusencia    = (tutorId, novaAusencia, removeId) => {
+    const tutor = tutores.find(t => t.id === tutorId)
+    if (pendingAuditRef) pendingAuditRef.current = { action: removeId ? 'ausencia_remove' : 'ausencia_add', nick: tutor?.nick }
     setTutores(prev => prev.map(t => {
       if (t.id !== tutorId) return t
       if (removeId) return { ...t, ausencias: (t.ausencias || []).filter(a => a.id !== removeId) }
       return { ...t, ausencias: [...(t.ausencias || []), novaAusencia] }
     }))
+  }
 
   const ausenciaTutor = ausenciaId !== null ? tutores.find(t => t.id === ausenciaId) : null
   const obsTutor      = obsId     !== null  ? tutores.find(t => t.id === obsId)      : null
@@ -2147,14 +2162,17 @@ function CadastroTab({ tutores, setTutores, cfg }) {
       )}
 
       <Modal open={modalOpen} onClose={handleClose} title={editId !== null ? 'Editar Tutor' : 'Cadastrar Novo Tutor'} icon={UserPlus}>
-        <TutorForm tutores={tutores} setTutores={setTutores} editId={editId} onDone={handleClose} />
+        <TutorForm tutores={tutores} setTutores={setTutores} editId={editId} onDone={handleClose} pendingAuditRef={pendingAuditRef} />
       </Modal>
 
       <ImportModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
         tutores={tutores}
-        onImport={novos => setTutores(prev => [...prev, ...novos])}
+        onImport={novos => {
+          if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_add', nick: `${novos.length} importados`, details: { count: novos.length } }
+          setTutores(prev => [...prev, ...novos])
+        }}
       />
 
       <ExportModal
@@ -3693,6 +3711,7 @@ function formatAuditDetails(action, details) {
   if (details.apelido) parts.push(details.apelido)
   if (details.target) parts.push(`→ ${details.target}`)
   if (details.cargo) parts.push(details.cargo)
+  if (details.data) parts.push(details.data)
   if (details.ip) parts.push(details.ip)
   if (details.server) parts.push(details.server)
   if (details.role) parts.push(details.role)
@@ -3700,6 +3719,7 @@ function formatAuditDetails(action, details) {
   if (details.apelidos) parts.push(details.apelidos.join(', '))
   if (details.names) parts.push(details.names.join(', '))
   if (details.allowedServers) parts.push(`servidores: ${details.allowedServers.join(', ')}`)
+  if (details.via) parts.push(`via ${details.via}`)
   return parts.length ? parts.join(' · ') : null
 }
 
@@ -3723,6 +3743,7 @@ function AuditoriaPanel() {
     { key: 'auth',      label: 'Autenticação' },
     { key: 'devices',   label: 'Dispositivos' },
     { key: 'tutores',   label: 'Tutores' },
+    { key: 'ia',        label: 'IA' },
     { key: 'admin',     label: 'Admin' },
     { key: 'settings',  label: 'Config' },
   ]
@@ -3732,8 +3753,9 @@ function AuditoriaPanel() {
   const ADMIN_ACTIONS   = new Set(['admin_apelidos_update','apikey_update','env_list_update'])
   const SETTINGS_ACTIONS = new Set(['settings_save'])
 
-  const matchCategory = (action) => {
+  const matchCategory = (action, details) => {
     if (typeFilter === 'all') return true
+    if (typeFilter === 'ia')       return !!details?.via
     if (typeFilter === 'auth')     return AUTH_ACTIONS.has(action)
     if (typeFilter === 'devices')  return DEVICE_ACTIONS.has(action)
     if (typeFilter === 'tutores')  return TUTOR_ACTIONS.has(action)
@@ -3744,7 +3766,7 @@ function AuditoriaPanel() {
 
   const q = search.trim().toLowerCase()
   const filtered = logs.filter(e => {
-    if (!matchCategory(e.action)) return false
+    if (!matchCategory(e.action, e.details)) return false
     if (!q) return true
     const label = (AUDIT_LABELS[e.action]?.label || e.action).toLowerCase()
     const det = formatAuditDetails(e.action, e.details) || ''
@@ -3808,6 +3830,7 @@ function AuditoriaPanel() {
                 <span style={{ color: C.textMuted, fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>{fmtTs(e.ts)}</span>
                 <div style={{ minWidth: 0 }}>
                   <span style={{ color: info.color, fontWeight: 600, marginRight: 6 }}>{info.label}</span>
+                  {e.details?.via && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: 'rgba(99,102,241,0.18)', border: `1px solid ${C.primaryBright}40`, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.05em', marginRight: 5 }}>IA</span>}
                   {e.actor && <span style={{ color: C.textSoft, fontSize: 11 }}>por <strong style={{ color: C.text }}>{e.actor}</strong></span>}
                   {det && <div style={{ color: C.textMuted, fontSize: 10, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{det}</div>}
                 </div>
@@ -4889,7 +4912,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
 }
 
 // ── FloatingChat ──────────────────────────────────────────────────────────────
-function FloatingChat({ tutores, setTutores }) {
+function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
   const [open, setOpen]       = useState(false)
   const [input, setInput]     = useState('')
   const [loading, setLoading] = useState(false)
@@ -4904,6 +4927,7 @@ function FloatingChat({ tutores, setTutores }) {
 
   const execAcoes = (acoes) => {
     if (!acoes?.length) return 0
+    if (pendingAuditRef) pendingAuditRef.current = { skip: true }
     setTutores(prev => {
       let updated = [...prev]
       acoes.forEach(a => {
@@ -5825,14 +5849,17 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
   }, [dataLoaded])
 
   // Salva no servidor a cada mudança (debounced 600ms)
-  const saveTimer    = useRef(null)
-  const fromPollRef  = useRef(false)
+  const saveTimer       = useRef(null)
+  const fromPollRef     = useRef(false)
+  const pendingAuditRef = useRef(null)
   useEffect(() => {
     if (!dataLoaded) return
     if (fromPollRef.current) { fromPollRef.current = false; return }
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
-      apiFetch('/api/tutores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tutores }) })
+      const auditInfo = pendingAuditRef.current
+      pendingAuditRef.current = null
+      apiFetch('/api/tutores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tutores, ...(auditInfo ? { _auditInfo: auditInfo } : {}) }) })
     }, 600)
     return () => clearTimeout(saveTimer.current)
   }, [tutores, dataLoaded])
@@ -5866,7 +5893,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
             </div>
           ) : (
             <>
-              {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} cfg={cfg} />}
+              {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} cfg={cfg} pendingAuditRef={pendingAuditRef} />}
               {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKeyConfigured={apiKeyConfigured} onSaveApiKey={handleSaveApiKey} servers={serversProp} envConfigs={envConfigs} cfg={cfg} />}
             </>
           )}
@@ -5907,7 +5934,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
           <span style={{ fontSize: 11, color: C.textMuted }}>→ Gerenciar</span>
         </button>
       )}
-      <FloatingChat tutores={tutores} setTutores={setTutores} />
+      <FloatingChat tutores={tutores} setTutores={setTutores} pendingAuditRef={pendingAuditRef} />
     </div>
   )
 }

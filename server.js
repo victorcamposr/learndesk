@@ -557,8 +557,8 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
   const server = req.headers['x-server'] || 'desconhecido'
   const actor = getDeviceApelido(req) || 'sistema'
   if (_auditInfo && typeof _auditInfo === 'object') {
-    const { action, nick, details } = _auditInfo
-    if (action) addAuditLog(actor, action, { server, nick, ...(details || {}) })
+    const { action, nick, details, skip } = _auditInfo
+    if (!skip && action) addAuditLog(actor, action, { server, nick, ...(details || {}) })
   } else {
     addAuditLog(actor, 'tutores_save', { server, count: tutores.length })
   }
