@@ -3176,7 +3176,7 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
             content: (
               <>
                 <div style={{ display: 'flex', gap: 16, marginBottom: 12, justifyContent: 'flex-end' }}>
-                  {[['Semana', '#1e40af'], ['FDS', C.gold]].map(([label, color]) => (
+                  {[['Semana', '#1e40af'], ['Final de semana', C.gold]].map(([label, color]) => (
                     <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                       <div style={{ width: 10, height: 10, borderRadius: 3, background: color }} />
                       <span style={{ fontSize: 11, color: C.textSoft }}>{label}</span>
@@ -3190,7 +3190,7 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
                     <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} allowDecimals={false} />
                     <Tooltip content={<RechartTooltip />} />
                     <Bar dataKey="Semana" name="Semana" fill="#1e40af" radius={[5, 5, 0, 0]} />
-                    <Bar dataKey="FDS" name="FDS" fill={C.gold} radius={[5, 5, 0, 0]} />
+                    <Bar dataKey="FDS" name="Final de semana" fill={C.gold} radius={[5, 5, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </>
