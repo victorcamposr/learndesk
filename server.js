@@ -363,13 +363,22 @@ app.post('/api/auth/request-access', requestAccessLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Token de dispositivo inválido.' })
 
   const devices = getDevices()
-  if (devices[deviceToken])
+  const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim()
+
+  // Dispositivo já existe: se estava pendente mas o IP agora é confiável, promove para aprovado
+  if (devices[deviceToken]) {
+    if (devices[deviceToken].status === 'pending' && getTrustedIPs()[ip]) {
+      devices[deviceToken].status = 'approved'
+      devices[deviceToken].approvedAt = new Date().toISOString()
+      setDevices(devices)
+      console.log(`✅ IP confiável (${ip}) — dispositivo pendente promovido para aprovado.`)
+    }
     return res.json({ status: devices[deviceToken].status })
+  }
 
   const isFirst = Object.keys(devices).length === 0
   const apelido = req.body.apelido && typeof req.body.apelido === 'string' ? req.body.apelido.slice(0, 40).trim() : ''
   const s = (typeof info === 'object' && info !== null) ? info : {}
-  const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim()
 
   const geo = await geolocateIP(ip)
   const isTrustedIP = !isFirst && !!getTrustedIPs()[ip]
