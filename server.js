@@ -32,6 +32,11 @@ const setKV = (key, val) => db.prepare('INSERT OR REPLACE INTO kv (key, value) V
 const hashPwd = p => bcrypt.hashSync(p, 12)
 const checkPwd = (plain, stored) => bcrypt.compareSync(plain, stored)
 
+const TOKEN_TTL = 7 * 24 * 60 * 60 * 1000 // 7 dias
+
+const getTrustedIPs = () => getKV('trusted_ips') || {}
+const setTrustedIPs = t => setKV('trusted_ips', t)
+
 const initAuth = () => {
   if (!process.env.ADMIN_PASSWORD) {
     console.error('❌ ADMIN_PASSWORD não definida no .env. Defina-a antes de iniciar o servidor.')
@@ -121,11 +126,6 @@ const requireServerAccess = (req, res, next) => {
     setKV('settings:grimoria-2', oldCfg)
   }
 })()
-
-const TOKEN_TTL = 7 * 24 * 60 * 60 * 1000 // 7 dias
-
-const getTrustedIPs = () => getKV('trusted_ips') || {}
-const setTrustedIPs = t => setKV('trusted_ips', t)
 
 function verifyToken(authToken, deviceToken) {
   if (!authToken || !deviceToken) return false
