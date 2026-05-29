@@ -2464,10 +2464,10 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meIn
     const assinante = meInfo?.apelido || 'Equipe'
     const linhas = membros.map((m, i) => {
       const obs = m.obsEmail.trim()
+      const impulsos = [m.nitroOficial && 'Oficial', m.nitroStaff && 'Staff'].filter(Boolean)
       return [
         `${i + 1}. ${m.nick}${m.cargo ? ` — ${m.cargo}` : ''}`,
-        `   Nitro Discord Oficial: ${m.nitroOficial ? '✅ Sim' : '❌ Não'}`,
-        `   Nitro Discord Staff: ${m.nitroStaff ? '✅ Sim' : '❌ Não'}`,
+        impulsos.length ? `   Impulsos: ${impulsos.join(' / ')}` : `   (sem impulsos)`,
         obs ? `   **Obs: ${obs}**` : null,
       ].filter(Boolean).join('\n')
     }).join('\n\n')
