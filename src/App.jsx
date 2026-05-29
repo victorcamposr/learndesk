@@ -4994,7 +4994,14 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      const n = execAcoes(data.acoes)
+      let n = 0
+      if (data._tutores) {
+        if (pendingAuditRef) pendingAuditRef.current = { skip: true }
+        setTutores(data._tutores)
+        n = (data.acoes || []).length
+      } else {
+        n = execAcoes(data.acoes)
+      }
       setMsgs(prev => [...prev, { role: 'ai', text: data.resposta, acoes: n, avisos: data._avisos || [] }])
     } catch (e) {
       setMsgs(prev => [...prev, { role: 'ai', text: `Erro: ${e.message}`, error: true }])

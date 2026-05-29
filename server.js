@@ -700,6 +700,46 @@ REGRAS (ordem de prioridade):
           : (a.nick || '?')
         addAuditLog(actor, auditAction, { server, nick, ...(a.data ? { data: a.data } : {}), ...(a.cargo ? { cargo: a.cargo } : {}), via: 'IA' })
       }
+
+      // Aplica acoes diretamente no banco (evita depender do save client-side)
+      const ATIVOS = ['Tutor', 'Em Teste', 'Sênior']
+      const stored = getKV(serverKey(req, 'tutores')) || []
+      let updatedStored = [...stored]
+      for (const a of parsed.acoes) {
+        if (a.tipo === 'add_presenca_todos') {
+          const exceto = (a.exceto || []).map(n => n.toLowerCase())
+          updatedStored = updatedStored.map(t => {
+            if (exceto.includes(t.nick?.toLowerCase())) return t
+            if (!ATIVOS.includes(t.cargo)) return t
+            return { ...t, presencas: [...new Set([...(t.presencas || []), a.data])] }
+          })
+        } else {
+          updatedStored = updatedStored.map(t => {
+            if (t.nick?.toLowerCase() !== a.nick?.toLowerCase()) return t
+            if (a.tipo === 'add_presenca')
+              return { ...t, presencas: [...new Set([...(t.presencas || []), a.data])] }
+            if (a.tipo === 'remove_presenca')
+              return { ...t, presencas: (t.presencas || []).filter(d => d !== a.data) }
+            if (a.tipo === 'add_ausencia') {
+              const nova = { id: Date.now() + Math.random(), dataInicio: a.dataInicio, dataFim: a.dataFim, motivo: a.motivo || '' }
+              return { ...t, ausencias: [...(t.ausencias || []), nova] }
+            }
+            if (a.tipo === 'remove_ausencia') {
+              const ativas = (t.ausencias || []).filter(au => au.dataFim && au.dataFim >= todayStr)
+              if (!ativas.length) return t
+              const proxima = ativas.reduce((min, au) => au.dataFim < min.dataFim ? au : min, ativas[0])
+              return { ...t, ausencias: (t.ausencias || []).filter(au => au.id !== proxima.id) }
+            }
+            if (a.tipo === 'change_cargo')
+              return { ...t, cargo: a.cargo, ...(a.cargo === 'Tutor' && t.cargo === 'Em Teste' ? { dataEfetivacao: todayStr } : {}) }
+            if (a.tipo === 'add_obs')
+              return { ...t, obs: a.obs }
+            return t
+          })
+        }
+      }
+      setKV(serverKey(req, 'tutores'), updatedStored)
+      parsed._tutores = updatedStored
     }
 
     res.json(parsed)
