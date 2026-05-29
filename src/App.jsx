@@ -240,17 +240,29 @@ function nextId(list) {
 }
 
 function parseHorarios(h) {
-  if (!h || h === '?') return { periodos: [], dias: 'Ambos' }
-  const [periodosPart, diasPart] = h.split(' · ')
-  const periodos = periodosPart.split('/').filter(p => PERIODOS.includes(p))
-  const dias = DIAS_SEMANA.includes(diasPart) ? diasPart : 'Ambos'
-  return { periodos, dias }
+  if (!h || h === '?') return { semana: [], fds: [] }
+  // Formato novo: "Sem: Manhã/Tarde · FDS: Noite"
+  if (h.includes('Sem:') || h.startsWith('FDS:')) {
+    const semMatch = h.match(/Sem:\s*([^·]+)/)
+    const fdsMatch = h.match(/FDS:\s*([^·]+)/)
+    const semana = semMatch ? semMatch[1].trim().split('/').filter(p => PERIODOS.includes(p)) : []
+    const fds    = fdsMatch ? fdsMatch[1].trim().split('/').filter(p => PERIODOS.includes(p)) : []
+    return { semana, fds }
+  }
+  // Formato legado: "Manhã/Tarde · Semana" ou "Manhã/Tarde"
+  const periodos = h.split(' · ')[0].split('/').filter(p => PERIODOS.includes(p))
+  return { semana: periodos, fds: periodos }
 }
 
-function serializeHorarios(periodos, dias) {
-  const p = PERIODOS.filter(p => periodos.includes(p)).join('/')
-  if (!p) return '?'
-  return dias && dias !== 'Ambos' ? `${p} · ${dias}` : p
+function serializeHorarios(semana, fds) {
+  const s = PERIODOS.filter(p => semana.includes(p)).join('/')
+  const f = PERIODOS.filter(p => fds.includes(p)).join('/')
+  if (!s && !f) return '?'
+  if (s === f) return s || f
+  const parts = []
+  if (s) parts.push(`Sem: ${s}`)
+  if (f) parts.push(`FDS: ${f}`)
+  return parts.join(' · ')
 }
 
 function todayStr() {
@@ -791,7 +803,7 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
 // ── Formulário de tutor ───────────────────────────────────────────────────────
 const BLANK = {
   nick: '', nomeRL: '', celular: '', discord: '', cargo: 'Em Teste',
-  atividade: 'Não Definida', dataInicio: '', horarios: [], diasSemana: 'Ambos',
+  atividade: 'Não Definida', dataInicio: '', horariosSemana: [], horariosFDS: [],
   detalheHorario: '', obs: '', ausencias: [], dataEfetivacao: '', presencas: [],
 }
 const PERIODO_ICONS = { Manhã: Sun, Tarde: Sunset, Noite: Moon }
@@ -805,8 +817,8 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
     if (isEdit) {
       const t = tutores.find(x => x.id === editId)
       if (t) {
-        const { periodos, dias } = parseHorarios(t.horarios)
-        setForm({ ...t, horarios: periodos, diasSemana: dias, celular: formatCelular(t.celular) })
+        const { semana, fds } = parseHorarios(t.horarios)
+        setForm({ ...t, horariosSemana: semana, horariosFDS: fds, celular: formatCelular(t.celular) })
       }
     } else {
       setForm(BLANK)
@@ -815,12 +827,15 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
   }, [editId, isEdit])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const togglePeriodo = p =>
-    setForm(f => ({ ...f, horarios: f.horarios.includes(p) ? f.horarios.filter(x => x !== p) : [...f.horarios, p] }))
+  const togglePeriodo = (p, col) =>
+    setForm(f => {
+      const key = col === 'fds' ? 'horariosFDS' : 'horariosSemana'
+      return { ...f, [key]: f[key].includes(p) ? f[key].filter(x => x !== p) : [...f[key], p] }
+    })
 
   const handleSave = () => {
     if (!form.nick.trim()) { setErrors({ nick: 'Nick é obrigatório' }); return }
-    const horariosStr = serializeHorarios(form.horarios, form.diasSemana)
+    const horariosStr = serializeHorarios(form.horariosSemana, form.horariosFDS)
     if (isEdit) {
       setTutores(prev => prev.map(t => t.id === editId ? { ...form, id: editId, horarios: horariosStr } : t))
     } else {
@@ -882,35 +897,31 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
 
       <div>
         <label style={labelStyle}><Clock size={12} /> Horários</label>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
-          {PERIODOS.map(p => {
-            const Icon = PERIODO_ICONS[p]
-            const sel = form.horarios.includes(p)
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {[['semana', 'Dias de semana', C.primaryBright], ['fds', 'Final de semana', C.gold]].map(([col, colLabel, accent]) => {
+            const arr = col === 'fds' ? form.horariosFDS : form.horariosSemana
             return (
-              <button key={p} type="button" onClick={() => togglePeriodo(p)} style={{
-                flex: 1,
-                background: sel ? `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})` : 'transparent',
-                border: `1px solid ${sel ? C.primaryBright + '66' : C.border}`,
-                borderRadius: 9, color: sel ? C.text : C.textSoft,
-                cursor: 'pointer', fontSize: 13, fontWeight: sel ? 600 : 400,
-                padding: '9px 0', transition: 'all .2s',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-              }}>
-                <Icon size={14} /> {p}
-              </button>
-            )
-          })}
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {[['Semana', 'Dias de semana'], ['FDS', 'Final de semana'], ['Ambos', 'Ambos']].map(([val, label]) => {
-            const sel = form.diasSemana === val
-            return (
-              <button key={val} type="button" onClick={() => set('diasSemana', val)} style={{
-                flex: 1, fontSize: 11, padding: '6px 0', borderRadius: 7, cursor: 'pointer',
-                background: sel ? `${C.teal}18` : 'transparent',
-                border: `1px solid ${sel ? C.teal + '70' : C.border}`,
-                color: sel ? C.teal : C.textSoft, fontWeight: sel ? 700 : 400, transition: 'all .15s',
-              }}>{label}</button>
+              <div key={col} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: accent, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8 }}>{colLabel}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {PERIODOS.map(p => {
+                    const Icon = PERIODO_ICONS[p]
+                    const sel = arr.includes(p)
+                    return (
+                      <button key={p} type="button" onClick={() => togglePeriodo(p, col)} style={{
+                        background: sel ? `${accent}18` : 'transparent',
+                        border: `1px solid ${sel ? accent + '60' : C.border}`,
+                        borderRadius: 7, color: sel ? accent : C.textSoft,
+                        cursor: 'pointer', fontSize: 12, fontWeight: sel ? 700 : 400,
+                        padding: '7px 10px', transition: 'all .15s',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                      }}>
+                        <Icon size={12} /> {p}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             )
           })}
         </div>
@@ -1408,11 +1419,17 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
       </div>
 
       {/* Horário */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Clock size={10} color={C.goldDim} style={{ flexShrink: 0 }} />
-        <span style={{ fontSize: 11, color: C.textSoft, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {(tutor.horarios && tutor.horarios !== '?') ? tutor.horarios : '—'}
-        </span>
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Clock size={10} color={C.goldDim} style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 11, color: C.textSoft, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {(tutor.horarios && tutor.horarios !== '?') ? tutor.horarios : '—'}
+          </span>
+        </div>
+        {tutor.detalheHorario && (
+          <span style={{ fontSize: 10, color: C.textMuted, paddingLeft: 16, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            title={tutor.detalheHorario}>{tutor.detalheHorario}</span>
+        )}
       </div>
 
       {/* Tempo de casa */}
@@ -2998,20 +3015,26 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
     const map = {}
     PERIODO_COMBOS.forEach(k => { map[k] = 0 })
     tutores.forEach(t => {
-      const h = (t.horarios || '?').split(' · ')[0] // ignora o sufixo de dia
+      const { semana, fds } = parseHorarios(t.horarios)
+      // Conta pelo conjunto de períodos únicos (união semana+fds)
+      const union = [...new Set([...semana, ...fds])]
+      const h = PERIODOS.filter(p => union.includes(p)).join('/')
       if (PERIODO_COMBOS.includes(h)) map[h]++
-      else map['Outro']++
+      else if (h) map['Outro']++
     })
     return PERIODO_COMBOS.map(name => ({ name, total: map[name] })).filter(d => d.total > 0)
   }, [tutores])
 
   const diasData = useMemo(() => {
-    const map = { Semana: 0, FDS: 0, Ambos: 0, '?': 0 }
+    const map = { Semana: 0, FDS: 0, Ambos: 0 }
     tutores.forEach(t => {
-      if (!t.horarios || t.horarios === '?') { map['?']++; return }
-      const part = t.horarios.split(' · ')[1]
-      const k = DIAS_SEMANA.includes(part) ? part : 'Ambos'
-      map[k]++
+      if (!t.horarios || t.horarios === '?') return
+      const { semana, fds } = parseHorarios(t.horarios)
+      const hasSem = semana.length > 0
+      const hasFDS = fds.length > 0
+      if (hasSem && hasFDS) map['Ambos']++
+      else if (hasSem) map['Semana']++
+      else if (hasFDS) map['FDS']++
     })
     return [
       { name: 'Dias de semana', total: map['Semana'], color: '#6366f1' },
