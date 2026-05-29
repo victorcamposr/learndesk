@@ -621,7 +621,7 @@ Responda SOMENTE JSON puro: { "resposta": "...", "acoes": [] }
 AÇÕES: add_presenca{nick,data} | remove_presenca{nick,data} | add_presenca_todos{data,exceto:[]} | add_ausencia{nick,dataInicio,dataFim,motivo} | remove_ausencia{nick} | change_cargo{nick,cargo:Tutor|Em Teste|Sênior|Inativo|Desligado} | add_obs{nick,obs}
 
 REGRAS (ordem de prioridade):
-1. DEDUP: antes de add_presenca, cheque "TODAS AS PRESENÇAS REGISTRADAS" — se data já existe → acoes:[], informe que já existe. Sem exceções.
+1. DEDUP: antes de add_presenca OU add_presenca_todos, cheque "TODAS AS PRESENÇAS REGISTRADAS" — se data já existe para o nick → acoes:[], informe que já existe. Sem exceções.
 2. DATA PADRÃO: sem data especificada → use ${todayStr}. Nunca use datas anteriores como padrão.
 3. DATA FUTURA: não adicione após ${todayStr} sem avisar.
 4. AUSÊNCIA ATIVA: avise se data cai dentro do período de ausência.
@@ -639,19 +639,38 @@ REGRAS (ordem de prioridade):
     if (text.startsWith('```')) text = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
     const parsed = JSON.parse(text)
 
-    // Server-side dedup: remove add_presenca se data já existe
+    // Server-side dedup: remove add_presenca e add_presenca_todos se data já existe
     if (Array.isArray(parsed.acoes)) {
       const tutorMap = {}
       for (const t of tutores) tutorMap[t.nick?.toLowerCase()] = t
       const removidas = []
+      const ATIVOS = ['Tutor', 'Em Teste', 'Sênior']
+
       parsed.acoes = parsed.acoes.filter(a => {
-        if (a.tipo !== 'add_presenca') return true
-        const t = tutorMap[a.nick?.toLowerCase()]
-        if (!t) return true
-        const already = (t.presencas || []).includes(a.data)
-        if (already) removidas.push(a)
-        return !already
+        if (a.tipo === 'add_presenca') {
+          const t = tutorMap[a.nick?.toLowerCase()]
+          if (!t) return true
+          const already = (t.presencas || []).includes(a.data)
+          if (already) removidas.push({ nick: a.nick, data: a.data })
+          return !already
+        }
+        if (a.tipo === 'add_presenca_todos') {
+          const exceto = (a.exceto || []).map(n => n.toLowerCase())
+          const afetados = tutores.filter(t =>
+            ATIVOS.includes(t.cargo) && !exceto.includes(t.nick?.toLowerCase())
+          )
+          const jaTem = afetados.filter(t => (t.presencas || []).includes(a.data))
+          const semPresenca = afetados.filter(t => !(t.presencas || []).includes(a.data))
+          jaTem.forEach(t => removidas.push({ nick: t.nick, data: a.data }))
+          // se todos já têm, remove a ação inteira
+          if (semPresenca.length === 0) return false
+          // se alguns já têm, ajusta o exceto para incluí-los
+          if (jaTem.length > 0) a.exceto = [...(a.exceto || []), ...jaTem.map(t => t.nick)]
+          return true
+        }
+        return true
       })
+
       if (removidas.length > 0) {
         const nomes = removidas.map(a => `${a.nick} em ${a.data}`).join(', ')
         parsed._avisos = [...(parsed._avisos || []), `Presença já registrada (ignorada): ${nomes}`]
