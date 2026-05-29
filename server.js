@@ -320,8 +320,7 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
   sessions[deviceToken] = { token, expires }
   setKV('session_tokens', sessions)
 
-  res.cookie('rubinot_auth', token, { ...AUTH_COOKIE_OPTS, expires: new Date(expires) })
-  res.json({ ok: true })
+  res.json({ ok: true, token })
 })
 
 app.get('/api/auth/verify', (req, res) => {

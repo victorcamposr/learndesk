@@ -71,10 +71,15 @@ const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15, atividade
 let _cfg = { ...DEFAULT_CFG }
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
-// Token de auth é cookie httpOnly — o browser envia automaticamente em credentials: 'include'.
+// Token de auth em sessionStorage (some ao fechar o browser, não é compartilhado entre abas).
+// Device token em localStorage (identifica o dispositivo, não é segredo de auth).
+const TOKEN_KEY     = 'rubinot_token'
 const SERVER_KEY    = 'rubinot_server'
 const DEVICE_KEY    = 'rubinot_device'
 const DENIED_AT_KEY = 'rubinot_denied_at'
+const getToken       = () => sessionStorage.getItem(TOKEN_KEY)
+const saveToken      = t => sessionStorage.setItem(TOKEN_KEY, t)
+const clearToken     = () => sessionStorage.removeItem(TOKEN_KEY)
 const getServer      = () => localStorage.getItem(SERVER_KEY)
 const saveServer     = s => localStorage.setItem(SERVER_KEY, s)
 const getDeviceToken  = () => localStorage.getItem(DEVICE_KEY) || sessionStorage.getItem(DEVICE_KEY)
@@ -178,18 +183,19 @@ const BASE = import.meta.env.BASE_URL
 let onUnauthorized = null
 
 function apiFetch(url, opts = {}) {
+  const token  = getToken()
   const server = getServer()
   const device = getDeviceToken()
   return fetch(API + url, {
     ...opts,
-    credentials: 'include',
     headers: {
       ...(opts.headers || {}),
+      ...(token  ? { 'x-auth-token':   token  } : {}),
       ...(server ? { 'x-server':       server } : {}),
       ...(device ? { 'x-device-token': device } : {}),
     },
   }).then(r => {
-    if (r.status === 401) onUnauthorized?.()
+    if (r.status === 401) { clearToken(); onUnauthorized?.() }
     return r
   })
 }
@@ -5211,6 +5217,7 @@ function LoginScreen({ onLogin, justApproved }) {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Erro ao autenticar'); return }
+      if (data.token) saveToken(data.token)
       onLogin()
     } catch {
       setError('Erro de conexão com o servidor')
@@ -5346,7 +5353,6 @@ function AuthGate() {
       if (ds === 'approved') {
         const authToken = getToken()
         const vr = await fetch(API + '/api/auth/verify', {
-          credentials: 'include',
           headers: {
             'x-device-token': deviceToken,
             ...(authToken ? { 'x-auth-token': authToken } : {}),
