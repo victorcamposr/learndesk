@@ -3254,13 +3254,14 @@ function DashboardRow({ t }) {
 }
 
 // ── DevicesPanel ──────────────────────────────────────────────────────────────
-function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmin, onSavePerms }) {
+function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmin, onSavePerms, currentApelido }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [expanded, setExpanded]           = useState(false)
   const [savingWorlds, setSavingWorlds]   = useState(false)
 
   const perm      = permissions[d.token] || {}
   const isAdmin   = d.apelido && adminApelidos.some(a => a.toLowerCase() === d.apelido.toLowerCase())
+  const isSelf    = currentApelido && d.apelido && d.apelido.toLowerCase() === currentApelido.toLowerCase()
   const [localAllowed, setLocalAllowed]   = useState(perm.allowedServers || [])
 
   useEffect(() => { setLocalAllowed(perm.allowedServers || []) }, [JSON.stringify(perm.allowedServers)])
@@ -3364,12 +3365,17 @@ function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmi
               {!isAdmin && perm.allowedServers?.length > 0 && <span style={{ fontSize: 11, color: C.teal, marginLeft: 8 }}>— {perm.allowedServers.length} mundo{perm.allowedServers.length !== 1 ? 's' : ''}</span>}
               {!isAdmin && !perm.allowedServers?.length && <span style={{ fontSize: 11, color: C.textSoft, marginLeft: 8 }}>— Sênior (todos)</span>}
             </div>
-            <button onClick={() => onToggleAdmin(d.apelido, isAdmin)} style={{
-              width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
-              background: isAdmin ? `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})` : 'rgba(255,255,255,0.12)',
-              position: 'relative', flexShrink: 0, transition: 'background .2s',
-              boxShadow: isAdmin ? `0 0 10px ${C.primaryBright}60` : 'none',
-            }}>
+            <button
+              onClick={() => { if (!isSelf) onToggleAdmin(d.apelido, isAdmin) }}
+              title={isSelf ? 'Você não pode remover seu próprio acesso de admin' : ''}
+              style={{
+                width: 44, height: 24, borderRadius: 12, border: 'none',
+                cursor: isSelf ? 'not-allowed' : 'pointer',
+                background: isAdmin ? `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})` : 'rgba(255,255,255,0.12)',
+                position: 'relative', flexShrink: 0, transition: 'background .2s',
+                boxShadow: isAdmin ? `0 0 10px ${C.primaryBright}60` : 'none',
+                opacity: isSelf ? 0.45 : 1,
+              }}>
               <span style={{
                 position: 'absolute', top: 3, left: isAdmin ? 23 : 3,
                 width: 18, height: 18, borderRadius: '50%', background: '#fff',
@@ -3480,28 +3486,35 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
+    if (!meInfo?.isAdmin) return
     const id = setInterval(() => load(true), 12000)
     return () => clearInterval(id)
-  }, [load])
+  }, [load, meInfo?.isAdmin])
 
   const act = async (url, token) => {
     await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
     if (url.includes('approve')) showToast('Dispositivo aprovado')
     else if (url.includes('deny')) showToast('Acesso negado', '#ef4444')
     else if (url.includes('delete')) showToast('Dispositivo excluído', '#ef4444')
-    load()
+    load(true)
   }
 
   const toggleAdmin = async (apelido, isAdmin) => {
     const updated = isAdmin
       ? adminApelidos.filter(a => a.toLowerCase() !== apelido.toLowerCase())
       : [...adminApelidos, apelido]
-    await apiFetch('/api/admin/apelidos', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apelidos: updated }),
-    })
-    showToast(isAdmin ? `${apelido} removido do grupo admin` : `${apelido} promovido a admin`)
-    load()
+    setAdminAp(updated) // atualização otimista imediata
+    try {
+      await apiFetch('/api/admin/apelidos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apelidos: updated }),
+      })
+      showToast(isAdmin ? `${apelido} removido do grupo admin` : `${apelido} promovido a admin`)
+    } catch {
+      setAdminAp(adminApelidos) // reverte se der erro
+      showToast('Erro ao salvar', '#ef4444')
+    }
+    load(true)
   }
 
   const handleSavePerms = async (token, allowedServers) => {
@@ -3521,7 +3534,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const pending = filtered.filter(d => d.status === 'pending')
   const others  = filtered.filter(d => d.status !== 'pending')
 
-  const rowProps = { adminApelidos, permissions, servers, onAct: act, onToggleAdmin: toggleAdmin, onSavePerms: handleSavePerms }
+  const rowProps = { adminApelidos, permissions, servers, onAct: act, onToggleAdmin: toggleAdmin, onSavePerms: handleSavePerms, currentApelido: meInfo?.apelido }
 
   return (
     <div>
@@ -4645,7 +4658,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
                 {/* Dispositivos pendentes */}
                 {pendingDevices > 0 && (
                   <button
-                    onClick={() => { setBellOpen(false); onOpenSettingsDevices?.() }}
+                    onClick={() => { setBellOpen(false); if (meInfo?.isAdmin) onOpenSettingsDevices?.() }}
                     style={{
                       width: '100%', background: `${C.primaryLight}12`,
                       border: 'none', borderBottom: `1px solid ${C.border}`,

@@ -62,7 +62,16 @@ const DEFAULT_ENV_LIST = [
 const getEnvList      = () => getKV('env_list') || DEFAULT_ENV_LIST
 const getValidServers = () => getEnvList().map(e => e.id)
 
-const getAdminApelidos = () => getKV('admin_apelidos') || []
+const getAdminApelidos = () => {
+  const saved = getKV('admin_apelidos') || []
+  if (saved.length === 0 && process.env.BOOTSTRAP_ADMIN) {
+    const list = [process.env.BOOTSTRAP_ADMIN]
+    setKV('admin_apelidos', list)
+    console.log(`🔑 Bootstrap admin: ${process.env.BOOTSTRAP_ADMIN}`)
+    return list
+  }
+  return saved
+}
 const getDevicePerms   = () => getKV('device_permissions') || {}
 const setDevicePerms   = p  => setKV('device_permissions', p)
 const getDeviceApelido = req => {
