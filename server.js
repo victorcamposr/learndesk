@@ -104,21 +104,31 @@ const requireAdmin = (req, res, next) => {
 
 const TOKEN_TTL = 7 * 24 * 60 * 60 * 1000 // 7 dias
 
-function verifyToken(token) {
+function verifyToken(authToken, deviceToken) {
+  if (!authToken) return false
+
+  // Sessões por dispositivo (novo)
+  if (deviceToken) {
+    const sessions = getKV('session_tokens') || {}
+    const s = sessions[deviceToken]
+    if (s?.token && !(s.expires && Date.now() > s.expires) && authToken.length === s.token.length) {
+      try { if (timingSafeEqual(Buffer.from(authToken, 'utf8'), Buffer.from(s.token, 'utf8'))) return true } catch {}
+    }
+  }
+
+  // Sessão global legada (compatibilidade com tokens antigos)
   const stored = getKV('session_token')
   const expires = getKV('session_token_expires')
-  if (!token || !stored) return false
+  if (!stored) return false
   if (expires && Date.now() > expires) return false
-  if (token.length !== stored.length) return false
+  if (authToken.length !== stored.length) return false
   try {
-    return timingSafeEqual(Buffer.from(token, 'utf8'), Buffer.from(stored, 'utf8'))
-  } catch {
-    return false
-  }
+    return timingSafeEqual(Buffer.from(authToken, 'utf8'), Buffer.from(stored, 'utf8'))
+  } catch { return false }
 }
 
 const requireAuth = (req, res, next) => {
-  if (!verifyToken(req.headers['x-auth-token']))
+  if (!verifyToken(req.headers['x-auth-token'], req.headers['x-device-token']))
     return res.status(401).json({ error: 'Não autorizado' })
   next()
 }
@@ -267,8 +277,20 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
     return res.status(401).json({ error: 'Senha incorreta ou dispositivo não autorizado.' })
 
   const token = randomBytes(32).toString('hex')
+  const expires = Date.now() + TOKEN_TTL
+
+  // Sessão por dispositivo
+  const sessions = getKV('session_tokens') || {}
+  // Limpa sessões expiradas
+  for (const [dt, s] of Object.entries(sessions)) {
+    if (s.expires && Date.now() > s.expires) delete sessions[dt]
+  }
+  sessions[deviceToken] = { token, expires }
+  setKV('session_tokens', sessions)
+
+  // Mantém legado para compatibilidade
   setKV('session_token', token)
-  setKV('session_token_expires', Date.now() + TOKEN_TTL)
+  setKV('session_token_expires', expires)
   res.json({ token })
 })
 
@@ -278,7 +300,13 @@ app.get('/api/auth/verify', (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/auth/logout', requireAuth, (_req, res) => {
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  const deviceToken = req.headers['x-device-token']
+  if (deviceToken) {
+    const sessions = getKV('session_tokens') || {}
+    delete sessions[deviceToken]
+    setKV('session_tokens', sessions)
+  }
   setKV('session_token', null)
   setKV('session_token_expires', 0)
   res.json({ ok: true })

@@ -64,6 +64,7 @@ const PIE_COLORS = ['#f59e0b', '#3b82f6', '#6b7280', '#ef4444', '#10b981', '#8b5
 const CARGOS     = ['Sênior', 'Tutor', 'Em Teste', 'Inativo', 'Desligado']
 const ATIVIDADES = ['Alta', 'Moderada', 'Baixa', 'Não Definida']
 const PERIODOS   = ['Manhã', 'Tarde', 'Noite']
+const DIAS_SEMANA = ['Semana', 'FDS', 'Ambos']
 
 const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15, atividadeAutomatica: true }
 
@@ -239,8 +240,17 @@ function nextId(list) {
 }
 
 function parseHorarios(h) {
-  if (!h || h === '?') return []
-  return h.split('/').filter(p => PERIODOS.includes(p))
+  if (!h || h === '?') return { periodos: [], dias: 'Ambos' }
+  const [periodosPart, diasPart] = h.split(' · ')
+  const periodos = periodosPart.split('/').filter(p => PERIODOS.includes(p))
+  const dias = DIAS_SEMANA.includes(diasPart) ? diasPart : 'Ambos'
+  return { periodos, dias }
+}
+
+function serializeHorarios(periodos, dias) {
+  const p = PERIODOS.filter(p => periodos.includes(p)).join('/')
+  if (!p) return '?'
+  return dias && dias !== 'Ambos' ? `${p} · ${dias}` : p
 }
 
 function todayStr() {
@@ -781,7 +791,7 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
 // ── Formulário de tutor ───────────────────────────────────────────────────────
 const BLANK = {
   nick: '', nomeRL: '', celular: '', discord: '', cargo: 'Em Teste',
-  atividade: 'Não Definida', dataInicio: '', horarios: [],
+  atividade: 'Não Definida', dataInicio: '', horarios: [], diasSemana: 'Ambos',
   detalheHorario: '', obs: '', ausencias: [], dataEfetivacao: '', presencas: [],
 }
 const PERIODO_ICONS = { Manhã: Sun, Tarde: Sunset, Noite: Moon }
@@ -794,7 +804,10 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
   useEffect(() => {
     if (isEdit) {
       const t = tutores.find(x => x.id === editId)
-      if (t) setForm({ ...t, horarios: parseHorarios(t.horarios), celular: formatCelular(t.celular) })
+      if (t) {
+        const { periodos, dias } = parseHorarios(t.horarios)
+        setForm({ ...t, horarios: periodos, diasSemana: dias, celular: formatCelular(t.celular) })
+      }
     } else {
       setForm(BLANK)
     }
@@ -807,7 +820,7 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
 
   const handleSave = () => {
     if (!form.nick.trim()) { setErrors({ nick: 'Nick é obrigatório' }); return }
-    const horariosStr = PERIODOS.filter(p => form.horarios.includes(p)).join('/') || '?'
+    const horariosStr = serializeHorarios(form.horarios, form.diasSemana)
     if (isEdit) {
       setTutores(prev => prev.map(t => t.id === editId ? { ...form, id: editId, horarios: horariosStr } : t))
     } else {
@@ -869,7 +882,7 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
 
       <div>
         <label style={labelStyle}><Clock size={12} /> Horários</label>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
           {PERIODOS.map(p => {
             const Icon = PERIODO_ICONS[p]
             const sel = form.horarios.includes(p)
@@ -885,6 +898,19 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
               }}>
                 <Icon size={14} /> {p}
               </button>
+            )
+          })}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[['Semana', 'Dias de semana'], ['FDS', 'Final de semana'], ['Ambos', 'Ambos']].map(([val, label]) => {
+            const sel = form.diasSemana === val
+            return (
+              <button key={val} type="button" onClick={() => set('diasSemana', val)} style={{
+                flex: 1, fontSize: 11, padding: '6px 0', borderRadius: 7, cursor: 'pointer',
+                background: sel ? `${C.teal}18` : 'transparent',
+                border: `1px solid ${sel ? C.teal + '70' : C.border}`,
+                color: sel ? C.teal : C.textSoft, fontWeight: sel ? 700 : 400, transition: 'all .15s',
+              }}>{label}</button>
             )
           })}
         </div>
@@ -2972,11 +2998,26 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
     const map = {}
     PERIODO_COMBOS.forEach(k => { map[k] = 0 })
     tutores.forEach(t => {
-      const h = t.horarios || '?'
+      const h = (t.horarios || '?').split(' · ')[0] // ignora o sufixo de dia
       if (PERIODO_COMBOS.includes(h)) map[h]++
       else map['Outro']++
     })
     return PERIODO_COMBOS.map(name => ({ name, total: map[name] })).filter(d => d.total > 0)
+  }, [tutores])
+
+  const diasData = useMemo(() => {
+    const map = { Semana: 0, FDS: 0, Ambos: 0, '?': 0 }
+    tutores.forEach(t => {
+      if (!t.horarios || t.horarios === '?') { map['?']++; return }
+      const part = t.horarios.split(' · ')[1]
+      const k = DIAS_SEMANA.includes(part) ? part : 'Ambos'
+      map[k]++
+    })
+    return [
+      { name: 'Dias de semana', total: map['Semana'], color: '#6366f1' },
+      { name: 'Final de semana', total: map['FDS'], color: '#f59e0b' },
+      { name: 'Ambos', total: map['Ambos'], color: '#2dd4bf' },
+    ].filter(d => d.total > 0)
   }, [tutores])
 
   const entradaMesData = useMemo(() => {
@@ -3144,6 +3185,23 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+            ),
+          },
+          {
+            title: 'Cobertura por Dia', Icon: Clock,
+            hidden: diasData.length === 0,
+            content: (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8 }}>
+                {diasData.map(d => (
+                  <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 12, color: C.textSoft, width: 140, flexShrink: 0 }}>{d.name}</span>
+                    <div style={{ flex: 1, height: 20, background: 'rgba(255,255,255,0.04)', borderRadius: 6, overflow: 'hidden' }}>
+                      <div style={{ width: `${Math.round((d.total / tutores.length) * 100)}%`, height: '100%', background: d.color, borderRadius: 6, transition: 'width .4s' }} />
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: d.color, width: 28, textAlign: 'right' }}>{d.total}</span>
+                  </div>
+                ))}
+              </div>
             ),
           },
           {
@@ -5624,19 +5682,8 @@ function AuthGate() {
   const handleSelectServer = id => {
     const allowed = meInfo?.allowedServers
     if (allowed && !allowed.includes(id)) return
-    const cfg = envConfigs[id] || {}
-    const locked = cfg.locked && cfg.hasPassword
-    if (meInfo?.isAdmin) {
-      saveServer(id)
-      setStatus('ok')
-      if (locked) setAdminSkipMsg('Acesso de administrador — senha do servidor ignorada')
-    } else if (locked) {
-      setPendingServer(id)
-      setStatus('env-locked')
-    } else {
-      saveServer(id)
-      setStatus('ok')
-    }
+    saveServer(id)
+    setStatus('ok')
   }
 
   useEffect(() => {
