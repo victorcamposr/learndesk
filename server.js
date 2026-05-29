@@ -12,7 +12,7 @@ import Database from 'better-sqlite3'
 import 'dotenv/config'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = join(__dirname, 'server-data')
+const DATA_DIR = process.env.DATA_DIR || join(__dirname, 'server-data')
 const FILE = join(DATA_DIR, 'analyses.json')
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
@@ -77,6 +77,16 @@ const isAdminReq = req => {
 const requireAdmin = (req, res, next) => {
   if (!isAdminReq(req)) return res.status(403).json({ error: 'Acesso negado' })
   next()
+}
+
+const requireServerAccess = (req, res, next) => {
+  const s = req.headers['x-server']
+  if (!s || !getValidServers().includes(s)) return next()
+  if (isAdminReq(req)) return next()
+  const dt = req.headers['x-device-token']
+  const perm = (dt && getDevicePerms()[dt]) || {}
+  if (!perm.allowedServers || perm.allowedServers.includes(s)) return next()
+  return res.status(403).json({ error: 'Sem acesso a este servidor' })
 }
 
 // Migração única: dados antigos (sem servidor) → grimoria-2
@@ -227,10 +237,16 @@ const saveAnalysesFor = (req, data) => writeFileSync(serverAnalysesFile(req), JS
 const app = express()
 app.set('trust proxy', 1)
 app.use(helmet())
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173', 'https://victorcamposr.github.io', 'https://backendcampin.duckdns.org'] }))
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173']
+app.use(cors({ origin: allowedOrigins }))
 app.use(express.json({ limit: '1mb' }))
 
-const loginLimiter = rateLimit({
+const IS_TEST = process.env.NODE_ENV === 'test'
+const noopMiddleware = (_req, _res, next) => next()
+
+const loginLimiter = IS_TEST ? noopMiddleware : rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: { error: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
@@ -238,7 +254,7 @@ const loginLimiter = rateLimit({
 })
 
 // max 5 solicitações por hora por IP
-const requestAccessLimiter = rateLimit({
+const requestAccessLimiter = IS_TEST ? noopMiddleware : rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: { error: 'Muitas solicitações. Tente novamente em 1 hora.' },
@@ -246,10 +262,18 @@ const requestAccessLimiter = rateLimit({
 })
 
 // max 20 verificações por minuto por IP (auto-poll a cada 30s = 2/min normalmente)
-const deviceStatusLimiter = rateLimit({
+const deviceStatusLimiter = IS_TEST ? noopMiddleware : rateLimit({
   windowMs: 60 * 1000,
   max: 20,
   message: { error: 'Muitas requisições.' },
+  standardHeaders: true, legacyHeaders: false,
+})
+
+// max 10 chamadas por minuto por IP (Gemini tem custo por requisição)
+const geminiLimiter = IS_TEST ? noopMiddleware : rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: 'Muitas chamadas à IA. Tente novamente em 1 minuto.' },
   standardHeaders: true, legacyHeaders: false,
 })
 
@@ -378,7 +402,7 @@ app.get('/api/auth/devices', requireAuth, (_req, res) => {
   res.json(Object.entries(devices).map(([token, d]) => ({ token, ...d })))
 })
 
-app.post('/api/auth/devices/approve', requireAuth, (req, res) => {
+app.post('/api/auth/devices/approve', requireAuth, requireAdmin, (req, res) => {
   const { token } = req.body || {}
   if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Token inválido' })
   const devices = getDevices()
@@ -389,7 +413,7 @@ app.post('/api/auth/devices/approve', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/auth/devices/deny', requireAuth, (req, res) => {
+app.post('/api/auth/devices/deny', requireAuth, requireAdmin, (req, res) => {
   const { token } = req.body || {}
   if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Token inválido' })
   const devices = getDevices()
@@ -400,7 +424,7 @@ app.post('/api/auth/devices/deny', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
-app.post('/api/auth/devices/delete', requireAuth, (req, res) => {
+app.post('/api/auth/devices/delete', requireAuth, requireAdmin, (req, res) => {
   const { token } = req.body || {}
   if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Token inválido' })
   const devices = getDevices()
@@ -428,16 +452,23 @@ app.get('/api/geo', async (req, res) => {
 })
 
 // ── Rotas protegidas ───────────────────────────────────────────────────────────
-app.get('/api/tutores', requireAuth, (req, res) => res.json(getKV(serverKey(req, 'tutores')) || []))
+app.get('/api/tutores', requireAuth, requireServerAccess, (req, res) => res.json(getKV(serverKey(req, 'tutores')) || []))
 
-app.post('/api/tutores', requireAuth, (req, res) => {
+app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
   const { tutores } = req.body || {}
   if (!Array.isArray(tutores)) return res.status(400).json({ error: 'Dados inválidos' })
+  const CARGOS_VALIDOS = ['Tutor', 'Em Teste', 'Sênior', 'Inativo', 'Desligado']
+  for (const t of tutores) {
+    if (typeof t !== 'object' || t === null || typeof t.nick !== 'string' || !t.nick.trim())
+      return res.status(400).json({ error: 'Tutor inválido: nick ausente' })
+    if (!CARGOS_VALIDOS.includes(t.cargo))
+      return res.status(400).json({ error: `Cargo inválido: ${t.cargo}` })
+  }
   setKV(serverKey(req, 'tutores'), tutores)
   res.json({ ok: true })
 })
 
-app.post('/api/chat', requireAuth, async (req, res) => {
+app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (req, res) => {
   const { message, history, tutores } = req.body || {}
   if (!message || typeof message !== 'string' || message.length > 2000)
     return res.status(400).json({ error: 'Mensagem inválida ou muito longa.' })
@@ -565,14 +596,14 @@ Para múltiplos tutores, gere múltiplas entradas em "acoes".`
     }
 
     res.json(parsed)
-  } catch (err) {
-    res.status(500).json({ error: err?.message || 'Erro desconhecido' })
+  } catch {
+    res.status(500).json({ error: 'Erro ao processar resposta da IA.' })
   }
 })
 
-app.get('/api/settings', requireAuth, (req, res) => res.json(getKV(serverKey(req, 'settings')) || {}))
+app.get('/api/settings', requireAuth, requireServerAccess, (req, res) => res.json(getKV(serverKey(req, 'settings')) || {}))
 
-app.post('/api/settings', requireAuth, (req, res) => {
+app.post('/api/settings', requireAuth, requireServerAccess, (req, res) => {
   const { settings } = req.body || {}
   if (!settings || typeof settings !== 'object' || Array.isArray(settings))
     return res.status(400).json({ error: 'Dados inválidos' })
@@ -582,18 +613,18 @@ app.post('/api/settings', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
-app.get('/api/config/apikey', requireAuth, (_req, res) => res.json({ apiKey: getKV('gemini_api_key') || '' }))
+app.get('/api/config/apikey', requireAuth, (_req, res) => res.json({ configured: !!(getKV('gemini_api_key') || process.env.GEMINI_API_KEY) }))
 
-app.post('/api/config/apikey', requireAuth, (req, res) => {
+app.post('/api/config/apikey', requireAuth, requireAdmin, (req, res) => {
   const { apiKey } = req.body || {}
   if (typeof apiKey !== 'string' || apiKey.length > 256) return res.status(400).json({ error: 'Dados inválidos' })
   setKV('gemini_api_key', apiKey)
   res.json({ ok: true })
 })
 
-app.get('/api/analyses', requireAuth, (req, res) => res.json(loadAnalysesFor(req)))
+app.get('/api/analyses', requireAuth, requireServerAccess, (req, res) => res.json(loadAnalysesFor(req)))
 
-app.post('/api/analyze', requireAuth, async (req, res) => {
+app.post('/api/analyze', requireAuth, requireServerAccess, geminiLimiter, async (req, res) => {
   const { tutores, cfg } = req.body || {}
   if (!Array.isArray(tutores) || tutores.length > 500) return res.status(400).json({ error: 'Dados inválidos' })
   const key = getKV('gemini_api_key') || process.env.GEMINI_API_KEY
@@ -619,9 +650,8 @@ app.post('/api/analyze', requireAuth, async (req, res) => {
     saveAnalysesFor(req, all)
 
     res.json(analysis)
-  } catch (err) {
-    const msg = err?.message || 'Erro desconhecido'
-    res.status(500).json({ error: msg })
+  } catch {
+    res.status(500).json({ error: 'Erro ao gerar análise.' })
   }
 })
 
@@ -667,7 +697,7 @@ app.get('/api/env/configs', requireAuth, (_req, res) => {
   res.json(configs)
 })
 
-app.post('/api/env/config/:serverId', requireAuth, (req, res) => {
+app.post('/api/env/config/:serverId', requireAuth, requireAdmin, (req, res) => {
   const { serverId } = req.params
   if (!getValidServers().includes(serverId))
     return res.status(400).json({ error: 'Servidor inválido' })
@@ -718,6 +748,7 @@ app.post('/api/auth/devices/:token/permissions', requireAuth, requireAdmin, (req
   res.json({ ok: true })
 })
 
-app.listen(3003, () => {
-  console.log('🤖 API Rubinot rodando em http://localhost:3003')
+const PORT = Number(process.env.PORT) || 3003
+app.listen(PORT, () => {
+  console.log(`🤖 API Rubinot rodando em http://localhost:${PORT}`)
 })

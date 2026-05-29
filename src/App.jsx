@@ -236,7 +236,9 @@ function calcMeses(dataInicio) {
 }
 
 function nextId(list) {
-  return list.length === 0 ? 1 : Math.max(...list.map(t => t.id)) + 1
+  if (list.length === 0) return 1
+  const ids = list.map(t => t.id).filter(Number.isFinite)
+  return (ids.length === 0 ? 0 : Math.max(...ids)) + 1
 }
 
 function parseHorarios(h) {
@@ -271,12 +273,13 @@ function todayStr() {
 }
 
 function ausenciaAtiva(a) {
-  return a.dataFim >= todayStr()
+  return !!a.dataFim && a.dataFim >= todayStr()
 }
 
 function diasRestantes(dataFim) {
+  if (!dataFim) return null
   const diff = Math.ceil((new Date(dataFim) - new Date()) / 86400000)
-  if (diff < 0) return null
+  if (!Number.isFinite(diff) || diff < 0) return null
   if (diff === 0) return 'vence hoje'
   return `${diff}d restante${diff !== 1 ? 's' : ''}`
 }
@@ -689,7 +692,7 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
     if (!dataFim)       e.dataFim = 'Informe a data de retorno'
     if (dataFim && dataFim < dataInicio) e.dataFim = 'Data deve ser após o início'
     if (Object.keys(e).length) { setErrors(e); return }
-    onSave({ id: Date.now(), motivo: motivo.trim(), dataInicio, dataFim })
+    onSave({ id: Date.now() + Math.random(), motivo: motivo.trim(), dataInicio, dataFim })
     reset()
     onClose()
   }
@@ -834,7 +837,10 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
     })
 
   const handleSave = () => {
-    if (!form.nick.trim()) { setErrors({ nick: 'Nick é obrigatório' }); return }
+    const e = {}
+    if (!form.nick.trim()) e.nick = 'Nick é obrigatório'
+    if (form.dataInicio && form.dataInicio > todayStr()) e.dataInicio = 'Data de início não pode ser futura'
+    if (Object.keys(e).length) { setErrors(e); return }
     const horariosStr = serializeHorarios(form.horariosSemana, form.horariosFDS)
     if (isEdit) {
       setTutores(prev => prev.map(t => t.id === editId ? { ...form, id: editId, horarios: horariosStr } : t))
@@ -891,7 +897,8 @@ function TutorForm({ tutores, setTutores, editId, onDone }) {
         </div>
         <div>
           <label style={labelStyle}><Calendar size={12} /> Data Início</label>
-          <input type="date" style={inp('dataInicio')} value={form.dataInicio} onChange={e => set('dataInicio', e.target.value)} />
+          <input type="date" style={inp('dataInicio')} value={form.dataInicio} max={todayStr()} onChange={e => set('dataInicio', e.target.value)} />
+          {errors.dataInicio && <span style={{ color: '#f87171', fontSize: 11, marginTop: 3, display: 'block' }}>{errors.dataInicio}</span>}
         </div>
       </div>
 
@@ -1705,8 +1712,8 @@ function normalizeHorario(h) {
 
 function parseXlsxRows(rows) {
   const header = rows.findIndex(r => r[1] === 'Cargo' && r[4] === 'Nick')
-  if (header === -1) return []
-  return rows.slice(header + 1).filter(r => r[4] && String(r[4]).trim()).map(r => ({
+  if (header === -1) return { rows: [], skipped: 0 }
+  const candidates = rows.slice(header + 1).filter(r => r[4] && String(r[4]).trim()).map(r => ({
     cargo:         String(r[1] || 'Tutor').trim(),
     celular:       r[2] ? formatCelular(String(r[2]).replace(/\D/g, '')) : '',
     nomeRL:        r[3] ? String(r[3]).trim() : '',
@@ -1716,18 +1723,21 @@ function parseXlsxRows(rows) {
     horarios:      normalizeHorario(r[9]),
     detalheHorario:r[10] ? String(r[10]).trim() : '',
     obs:           r[11] ? String(r[11]).trim() : '',
-  })).filter(r => CARGOS.includes(r.cargo))
+  }))
+  const valid = candidates.filter(r => CARGOS.includes(r.cargo))
+  return { rows: valid, skipped: candidates.length - valid.length }
 }
 
 const CARGO_BADGE_COLOR = { Sênior: C.teal, Tutor: C.gold, 'Em Teste': '#3b82f6', Inativo: '#6b7280', Desligado: '#ef4444' }
 
 function ImportModal({ open, onClose, tutores, onImport }) {
-  const [rows, setRows]       = useState([])
+  const [rows, setRows]         = useState([])
+  const [skipped, setSkipped]   = useState(0)
   const [fileName, setFileName] = useState('')
-  const [error, setError]     = useState('')
-  const inputRef              = useRef(null)
+  const [error, setError]       = useState('')
+  const inputRef                = useRef(null)
 
-  useEffect(() => { if (!open) { setRows([]); setFileName(''); setError('') } }, [open])
+  useEffect(() => { if (!open) { setRows([]); setSkipped(0); setFileName(''); setError('') } }, [open])
 
   const handleFile = useCallback(e => {
     const file = e.target.files?.[0]
@@ -1739,10 +1749,11 @@ function ImportModal({ open, onClose, tutores, onImport }) {
         const wb   = XLSX.read(evt.target.result, { type: 'array' })
         const ws   = wb.Sheets[wb.SheetNames[0]]
         const data = XLSX.utils.sheet_to_json(ws, { header: 1 })
-        const parsed = parseXlsxRows(data)
+        const { rows: parsed, skipped: sk } = parseXlsxRows(data)
         if (!parsed.length) { setError('Nenhum tutor válido encontrado na planilha.'); return }
         setFileName(file.name)
         setRows(parsed)
+        setSkipped(sk)
       } catch {
         setError('Erro ao ler a planilha. Verifique se o arquivo está no formato correto.')
       }
@@ -1794,12 +1805,17 @@ function ImportModal({ open, onClose, tutores, onImport }) {
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.teal, boxShadow: `0 0 6px ${C.teal}` }} />
             <span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{fileName}</span>
             <span style={{ fontSize: 12, color: C.textMuted }}>— {rows.length} tutor{rows.length !== 1 ? 'es' : ''} encontrado{rows.length !== 1 ? 's' : ''}</span>
+            {skipped > 0 && (
+              <span style={{ fontSize: 11, color: '#f87171', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, padding: '2px 8px' }}>
+                {skipped} linha{skipped !== 1 ? 's' : ''} ignorada{skipped !== 1 ? 's' : ''} (cargo inválido)
+              </span>
+            )}
             {duplicates.length > 0 && (
               <span style={{ fontSize: 11, color: '#f97316', background: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.3)', borderRadius: 6, padding: '2px 8px' }}>
                 ⚠️ {duplicates.length} já cadastrado{duplicates.length !== 1 ? 's' : ''}
               </span>
             )}
-            <button onClick={() => { setRows([]); setFileName('') }} style={{ ...btn('subtle', 'sm'), marginLeft: 'auto' }}>
+            <button onClick={() => { setRows([]); setSkipped(0); setFileName('') }} style={{ ...btn('subtle', 'sm'), marginLeft: 'auto' }}>
               Trocar arquivo
             </button>
           </div>
@@ -1934,7 +1950,7 @@ function ExportModal({ open, onClose, tutores }) {
   )
 }
 
-function CadastroTab({ tutores, setTutores }) {
+function CadastroTab({ tutores, setTutores, cfg }) {
   const [modalOpen, setModalOpen]   = useState(false)
   const [editId, setEditId]         = useState(null)
   const [ausenciaId, setAusenciaId] = useState(null)
@@ -1977,7 +1993,7 @@ function CadastroTab({ tutores, setTutores }) {
     const alertas  = ativos.filter(t => getAtividade(t) === 'Baixa' || getAtividade(t) === 'Não Definida')
     const presencasHoje = ativos.filter(t => (t.presencas || []).includes(hoje)).length
     return { total: tutores.length, ativos: ativos.length, ausentes: ausentes.length, alertas: alertas.length, presencasHoje }
-  }, [tutores])
+  }, [tutores, cfg])
 
   const ATIVIDADE_ORDER = { 'Alta': 0, 'Moderada': 1, 'Baixa': 2, 'Não Definida': 3 }
 
@@ -1992,11 +2008,11 @@ function CadastroTab({ tutores, setTutores }) {
       })
       .filter(t =>
         t.nick.toLowerCase().includes(q) ||
-        t.nomeRL.toLowerCase().includes(q) ||
+        (t.nomeRL || '').toLowerCase().includes(q) ||
         (t.discord || '').toLowerCase().includes(q)
       )
       .sort((a, b) => (ATIVIDADE_ORDER[getAtividade(a)] ?? 3) - (ATIVIDADE_ORDER[getAtividade(b)] ?? 3))
-  }, [tutores, search, filterTab])
+  }, [tutores, search, filterTab, cfg])
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
@@ -2974,7 +2990,7 @@ function PresencaHistoricoChart({ tutores }) {
 }
 
 // ── DashboardTab ──────────────────────────────────────────────────────────────
-function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envConfigs }) {
+function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envConfigs, cfg }) {
   const [sortAsc, setSortAsc] = useState(false)
   const [pagamentoOpen, setPagamentoOpen] = useState(false)
 
@@ -3008,7 +3024,7 @@ function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envCon
 
   const atividadeData = useMemo(() =>
     ATIVIDADES.map(a => ({ name: a, total: tutores.filter(t => getAtividade(t) === a).length }))
-  , [tutores])
+  , [tutores, cfg])
 
   const periodoData = useMemo(() => {
     const map = Object.fromEntries(PERIODOS.map(p => [p, { Semana: 0, FDS: 0 }]))
@@ -3462,37 +3478,32 @@ function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmi
       )}
 
       {/* Ações */}
-      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-        {d.status !== 'approved' && (
-          <button style={btn('teal', 'sm')} onClick={() => onAct('/api/auth/devices/approve', d.token)}>
-            <Check size={12} /> Aprovar
-          </button>
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
+        {confirmDelete ? (
+          <>
+            <span style={{ fontSize: 11, color: '#f87171', alignSelf: 'center' }}>Excluir permanentemente?</span>
+            <button style={btn('danger', 'sm')} onClick={() => { onAct('/api/auth/devices/delete', d.token); setConfirmDelete(false) }}>
+              <Trash2 size={12} /> Confirmar
+            </button>
+            <button style={btn('ghost', 'sm')} onClick={() => setConfirmDelete(false)}><X size={12} /> Cancelar</button>
+          </>
+        ) : (
+          <>
+            {d.status !== 'approved' && (
+              <button style={btn('teal', 'sm')} onClick={() => onAct('/api/auth/devices/approve', d.token)}>
+                <Check size={12} /> Aprovar
+              </button>
+            )}
+            {d.status !== 'denied' && (
+              <button style={btn('danger', 'sm')} onClick={() => onAct('/api/auth/devices/deny', d.token)}>
+                <X size={12} /> {d.status === 'approved' ? 'Revogar' : 'Negar'}
+              </button>
+            )}
+            <button style={{ ...btn('ghost', 'sm'), color: C.textMuted }} onClick={() => setConfirmDelete(true)}>
+              <Trash2 size={12} /> Excluir
+            </button>
+          </>
         )}
-        {d.status !== 'denied' && (
-          <button style={btn('danger', 'sm')} onClick={() => onAct('/api/auth/devices/deny', d.token)}>
-            <X size={12} /> {d.status === 'approved' ? 'Revogar' : 'Negar'}
-          </button>
-        )}
-        <div style={{ position: 'relative' }}>
-          <button style={{ ...btn('ghost', 'sm'), color: confirmDelete ? '#f87171' : C.textMuted, borderColor: confirmDelete ? '#ef444450' : C.border }} onClick={() => setConfirmDelete(v => !v)}>
-            <Trash2 size={12} /> Excluir
-          </button>
-          {confirmDelete && (
-            <>
-              <div style={{ position: 'fixed', inset: 0, zIndex: 699 }} onClick={() => setConfirmDelete(false)} />
-              <div style={{ position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, zIndex: 700, background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, padding: '12px 14px', boxShadow: '0 16px 48px rgba(0,0,0,0.8)', whiteSpace: 'nowrap' }}>
-                <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 8 }}>Excluir permanentemente?</div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button style={btn('danger', 'sm')} onClick={() => { onAct('/api/auth/devices/delete', d.token); setConfirmDelete(false) }}>
-                    <Trash2 size={12} /> Confirmar
-                  </button>
-                  <button style={btn('ghost', 'sm')} onClick={() => setConfirmDelete(false)}><X size={12} /></button>
-                </div>
-                <div style={{ position: 'absolute', bottom: -7, right: 14, width: 0, height: 0, border: '7px solid transparent', borderTopColor: 'rgba(239,68,68,0.4)' }} />
-              </div>
-            </>
-          )}
-        </div>
       </div>
     </div>
   )
@@ -3573,7 +3584,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
       body: JSON.stringify({ role: 'senior', allowedServers: allowedServers.length > 0 ? allowedServers : null }),
     })
     showToast('Permissões salvas')
-    load()
+    load(true)
   }
 
   const q = search.trim().toLowerCase()
@@ -3672,14 +3683,16 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
       {/* Tabs */}
       {(() => {
         const isSenior = meInfo?.role === 'senior' && !meInfo?.isAdmin
+        const isAdmin  = meInfo?.isAdmin
         const baseTabs = isSenior ? [
-          { key: 'config',   label: 'Regras',       icon: Activity },
-          { key: 'ambiente', label: 'Ambiente',      icon: Lock },
+          { key: 'config', label: 'Regras', icon: Activity },
+        ] : isAdmin ? [
+          { key: 'config',  label: 'Regras',       icon: Activity },
+          { key: 'mundos',  label: 'Mundos',        icon: Swords },
+          { key: 'devices', label: 'Dispositivos',  icon: Globe },
         ] : [
-          { key: 'config',   label: 'Regras',        icon: Activity },
-          { key: 'ambiente', label: 'Ambiente',       icon: Lock },
-          { key: 'mundos',   label: 'Mundos',         icon: Swords },
-          { key: 'devices',  label: 'Dispositivos',   icon: Globe },
+          { key: 'config', label: 'Regras',  icon: Activity },
+          { key: 'mundos', label: 'Mundos',  icon: Swords },
         ]
         const allTabs = baseTabs
         return (
@@ -3701,8 +3714,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
       })()}
 
       {tab === 'devices' ? <DevicesPanel servers={servers} meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> :
-       tab === 'ambiente' ? <EnvConfigPanel servers={servers} envConfigs={envConfigs} onUpdateEnv={onUpdateEnv} canRename={meInfo?.role !== 'senior'} meInfo={meInfo} /> :
-       tab === 'mundos'   ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> : (
+       tab === 'mundos'  ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> : (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
         {/* Toggle atividade automática */}
@@ -4729,8 +4741,13 @@ function FloatingChat({ tutores, setTutores }) {
             const nova = { id: Date.now() + Math.random(), dataInicio: a.dataInicio, dataFim: a.dataFim, motivo: a.motivo || '' }
             return { ...t, ausencias: [...(t.ausencias||[]), nova] }
           }
-          if (a.tipo === 'remove_ausencia')
-            return { ...t, ausencias: (t.ausencias||[]).filter(au => au.dataFim < todayStr()) }
+          if (a.tipo === 'remove_ausencia') {
+            const hoje = todayStr()
+            const ativas = (t.ausencias||[]).filter(au => au.dataFim && au.dataFim >= hoje)
+            if (!ativas.length) return t
+            const proxima = ativas.reduce((min, au) => au.dataFim < min.dataFim ? au : min, ativas[0])
+            return { ...t, ausencias: (t.ausencias||[]).filter(au => au.id !== proxima.id) }
+          }
           if (a.tipo === 'change_cargo')
             return { ...t, cargo: a.cargo, ...(a.cargo === 'Tutor' && t.cargo === 'Em Teste' ? { dataEfetivacao: todayStr() } : {}) }
           if (a.tipo === 'add_obs')
@@ -5475,9 +5492,12 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
 
   const openSettings = useCallback((t = 'config') => { setSettingsTab(t); setSettingsOpen(true) }, [])
 
-  const handleSaveSettings = cfg => {
-    _cfg = cfg
-    apiFetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: cfg }) })
+  const [cfg, setCfg] = useState(DEFAULT_CFG)
+
+  const handleSaveSettings = newCfg => {
+    _cfg = newCfg
+    setCfg(newCfg)
+    apiFetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: newCfg }) })
     setSettingsOpen(false)
   }
 
@@ -5494,8 +5514,11 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
       apiFetch('/api/config/apikey').then(r => r.json()).catch(() => ({})),
     ]).then(([tutoresData, settingsData, apikeyData]) => {
       setTutores(Array.isArray(tutoresData) ? tutoresData : [])
-      if (settingsData && !settingsData.error && Object.keys(settingsData).length > 0)
-        _cfg = { ...DEFAULT_CFG, ...settingsData }
+      if (settingsData && !settingsData.error && Object.keys(settingsData).length > 0) {
+        const merged = { ...DEFAULT_CFG, ...settingsData }
+        _cfg = merged
+        setCfg(merged)
+      }
       if (apikeyData?.configured) setApiKeyConfigured(true)
     }).catch(() => setTutores([]))
       .finally(() => setDataLoaded(true))
@@ -5558,8 +5581,8 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
             </div>
           ) : (
             <>
-              {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} />}
-              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKeyConfigured={apiKeyConfigured} onSaveApiKey={handleSaveApiKey} servers={serversProp} envConfigs={envConfigs} />}
+              {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} cfg={cfg} />}
+              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKeyConfigured={apiKeyConfigured} onSaveApiKey={handleSaveApiKey} servers={serversProp} envConfigs={envConfigs} cfg={cfg} />}
             </>
           )}
         </main>

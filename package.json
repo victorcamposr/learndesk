@@ -8,7 +8,13 @@
     "server": "node server.js",
     "client": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:api": "playwright test --config playwright.config.js",
+    "test:e2e": "playwright test --config playwright.e2e.config.js",
+    "test:report": "playwright show-report",
+    "test:report:e2e": "playwright show-report playwright-report-e2e"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.0",
@@ -27,6 +33,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.1",
