@@ -80,6 +80,16 @@ const getAdminApelidos = () => {
 }
 const getDevicePerms   = () => getKV('device_permissions') || {}
 const setDevicePerms   = p  => setKV('device_permissions', p)
+
+// ── Audit Log ─────────────────────────────────────────────────────────────────
+const MAX_AUDIT = 500
+const getAuditLog = () => getKV('audit_log') || []
+const addAuditLog = (actor, action, details = {}) => {
+  const log = getAuditLog()
+  log.unshift({ id: Date.now(), ts: new Date().toISOString(), actor, action, details })
+  if (log.length > MAX_AUDIT) log.length = MAX_AUDIT
+  setKV('audit_log', log)
+}
 const getDeviceApelido = req => {
   const dt = req.headers['x-device-token']
   if (!dt || typeof dt !== 'string') return null
@@ -177,54 +187,33 @@ function buildPrompt(tutores, cfg = {}) {
 
   const tutoresFormatted = tutores.map(t => {
     const ausenciasAtivas = (t.ausencias || []).filter(a => a.dataFim >= today)
-    return {
+    const entry = {
       nick: t.nick,
-      nomeRL: t.nomeRL || undefined,
       cargo: t.cargo,
       atividade: t.atividade,
-      tempoCasa: calcTempo(t.dataInicio),
-      horarios: t.horarios || '?',
-      ausente: ausenciasAtivas.length > 0 ? `sim (retorno: ${ausenciasAtivas[0].dataFim})` : 'não',
-      obs: t.obs || undefined,
+      tempo: calcTempo(t.dataInicio),
+      turno: t.horarios || '?',
     }
+    if (ausenciasAtivas.length > 0) entry.ausente = ausenciasAtivas[0].dataFim
+    if (t.nomeRL) entry.nomeRL = t.nomeRL
+    if (t.obs) entry.obs = t.obs
+    return entry
   })
 
-  return `Você é gestor de tutores do servidor de Tibia "Rubinot". Analise os dados da equipe e produza um relatório CURTO e DIRETO — sem enrolação, sem repetir dados óbvios. Máximo 400 palavras no total.
+  return `Gestor de tutores Rubinot (Tibia). Relatório CURTO e DIRETO, máx 400 palavras.
 
-REGRAS DE NEGÓCIO (use para gerar insights):
-- Cargos: "Em Teste" (máx ${30} dias) → "Tutor" (efetivado) → "Inativo/Desligado"
-- "Em Teste" por mais de 30 dias sem efetivação = decisão pendente urgente
-- Atividade calculada por presenças no mês atual: 0 = Não Definida | 1–${baixaMax} = Baixa | ${baixaMax + 1}–${moderadaMax} = Moderada | ${moderadaMax + 1}+ = Alta
-- Tutor efetivado com atividade Baixa ou Não Definida = alerta de engajamento
-- Ausência sem retorno definido = risco de cobertura
-- Alerta de inatividade: sem presença há mais de ${diasParaAlerta} dias
-- Turnos: manhã, tarde, noite — cobertura 24/7 é crítica
+REGRAS: Em Teste(máx 30d)→Tutor→Inativo/Desligado. Atividade/mês: 0=ND|1-${baixaMax}=Baixa|${baixaMax+1}-${moderadaMax}=Mod|${moderadaMax+1}+=Alta. Alertas: Tutor c/Baixa ou ND, ausência sem retorno, Em Teste>30d, sem presença>${diasParaAlerta}d. Turnos manhã/tarde/noite — 24/7 crítico.
 
-SNAPSHOT (${new Date().toLocaleDateString('pt-BR')}):
-- Total: ${tutores.length} | Ativos: ${ativos.length} | Ausentes agora: ${ausentes.length}
-- Atividade → Alta: ${atividadeCounts.Alta} | Moderada: ${atividadeCounts.Moderada} | Baixa: ${atividadeCounts.Baixa} | Não Definida: ${atividadeCounts['Não Definida']}
-- Turnos: ${JSON.stringify(periodoCount)}
+SNAPSHOT ${new Date().toLocaleDateString('pt-BR')}: Total:${tutores.length} Ativos:${ativos.length} Ausentes:${ausentes.length} | Alta:${atividadeCounts.Alta} Mod:${atividadeCounts.Moderada} Baixa:${atividadeCounts.Baixa} ND:${atividadeCounts['Não Definida']} | Turnos:${JSON.stringify(periodoCount)}
 
-TUTORES:
-${JSON.stringify(tutoresFormatted, null, 2)}
+TUTORES:${JSON.stringify(tutoresFormatted)}
 
----
-
-REGRA CRÍTICA: use APENAS os dados fornecidos. Não invente informações. Se um campo está preenchido (ex: horarios), não diga que está faltando.
-
-Produza exatamente estas 4 seções, cada uma com 2-4 linhas no máximo. Use nomes reais. Seja direto:
+Use SOMENTE os dados acima. Produza exatamente 4 seções (2-4 linhas cada), sem repetir o snapshot:
 
 ## ⚠️ ATENÇÃO IMEDIATA
-Quem precisa de ação agora e por quê — baseado SOMENTE nos dados (atividade Baixa/Não Definida, ausência ativa, "Em Teste" há muito tempo).
-
 ## 📊 COBERTURA DE TURNOS
-Quais turnos estão bem cobertos e quais estão em risco. Mencione quantos tutores cobrem cada turno.
-
 ## 🔴 TOP 3 RISCOS
-Liste em ordem de urgência. Uma linha cada. Só riscos reais visíveis nos dados.
-
-## 👥 NECESSIDADES DA EQUIPE
-Com base na cobertura atual: quantos tutores a mais seriam ideais e em quais turnos? A equipe está subdimensionada, adequada ou superdimensionada?`
+## 👥 NECESSIDADES DA EQUIPE`
 }
 
 const serverKey = (req, key) => {
@@ -318,6 +307,8 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
   sessions[deviceToken] = { token, expires }
   setKV('session_tokens', sessions)
 
+  const apelido2 = getDevices()[deviceToken]?.apelido || deviceToken.slice(0, 8)
+  addAuditLog(apelido2, 'login', { ip: (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim() })
   res.json({ ok: true, token })
 })
 
@@ -353,6 +344,7 @@ app.post('/api/auth/set-password', async (req, res) => {
   setKV('session_tokens', sessions)
 
   console.log(`🔑 Senha definida para: ${apelido}`)
+  addAuditLog(apelido, 'password_set', {})
   res.json({ ok: true, token })
 })
 
@@ -369,6 +361,8 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
     delete sessions[deviceToken]
     setKV('session_tokens', sessions)
   }
+  const actor = getDeviceApelido(req) || (deviceToken || '').slice(0, 8)
+  addAuditLog(actor, 'logout', {})
   res.clearCookie('rubinot_auth', AUTH_COOKIE_OPTS)
   res.json({ ok: true })
 })
@@ -486,6 +480,7 @@ app.post('/api/auth/devices/approve', requireAuth, requireAdmin, (req, res) => {
     }
   }
 
+  addAuditLog(getDeviceApelido(req) || 'admin', 'device_approve', { apelido: devices[token].apelido, ip: deviceIP })
   res.json({ ok: true })
 })
 
@@ -501,6 +496,7 @@ app.post('/api/auth/trusted-ips/revoke', requireAuth, requireAdmin, (req, res) =
   delete trusted[ip]
   setTrustedIPs(trusted)
   console.log(`🔓 IP ${ip} removido dos confiáveis.`)
+  addAuditLog(getDeviceApelido(req) || 'admin', 'ip_revoke', { ip })
   res.json({ ok: true })
 })
 
@@ -512,6 +508,7 @@ app.post('/api/auth/devices/deny', requireAuth, requireAdmin, (req, res) => {
   devices[token].status = 'denied'
   devices[token].deniedAt = new Date().toISOString()
   setDevices(devices)
+  addAuditLog(getDeviceApelido(req) || 'admin', 'device_deny', { apelido: devices[token].apelido, ip: devices[token].ip })
   res.json({ ok: true })
 })
 
@@ -520,8 +517,10 @@ app.post('/api/auth/devices/delete', requireAuth, requireAdmin, (req, res) => {
   if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Token inválido' })
   const devices = getDevices()
   if (!devices[token]) return res.status(404).json({ error: 'Dispositivo não encontrado' })
+  const { apelido, ip } = devices[token]
   delete devices[token]
   setDevices(devices)
+  addAuditLog(getDeviceApelido(req) || 'admin', 'device_delete', { apelido, ip })
   res.json({ ok: true })
 })
 
@@ -546,7 +545,7 @@ app.get('/api/geo', async (req, res) => {
 app.get('/api/tutores', requireAuth, requireServerAccess, (req, res) => res.json(getKV(serverKey(req, 'tutores')) || []))
 
 app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
-  const { tutores } = req.body || {}
+  const { tutores, _auditInfo } = req.body || {}
   if (!Array.isArray(tutores)) return res.status(400).json({ error: 'Dados inválidos' })
   const CARGOS_VALIDOS = ['Tutor', 'Em Teste', 'Sênior', 'Inativo', 'Desligado']
   for (const t of tutores) {
@@ -554,6 +553,14 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
       return res.status(400).json({ error: 'Tutor inválido: nick ausente' })
     if (!CARGOS_VALIDOS.includes(t.cargo))
       return res.status(400).json({ error: `Cargo inválido: ${t.cargo}` })
+  }
+  const server = req.headers['x-server'] || 'desconhecido'
+  const actor = getDeviceApelido(req) || 'sistema'
+  if (_auditInfo && typeof _auditInfo === 'object') {
+    const { action, nick, details } = _auditInfo
+    if (action) addAuditLog(actor, action, { server, nick, ...(details || {}) })
+  } else {
+    addAuditLog(actor, 'tutores_save', { server, count: tutores.length })
   }
   setKV(serverKey(req, 'tutores'), tutores)
   res.json({ ok: true })
@@ -600,59 +607,28 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
     `${m.role === 'user' ? 'usuário' : 'assistente'}: ${m.text}`
   ).join('\n')
 
-  const prompt = `Você é um assistente de gestão da equipe de tutores do servidor Rubinot.
-Hoje: ${todayStr} (${diaSemana}) | Ontem: ${ontemStr}
+  const prompt = `Assistente de gestão de tutores do servidor Rubinot. Hoje:${todayStr}(${diaSemana}) Ontem:${ontemStr}
 
 TUTORES:
 ${resumo}
 
-TODOS OS NICKS: ${todosNicks}
+NICKS: ${todosNicks}
+${historicoFmt ? `\nHISTÓRICO:\n${historicoFmt}\n` : ''}
+USUÁRIO: "${message}"
 
-${historicoFmt ? `HISTÓRICO RECENTE:\n${historicoFmt}\n` : ''}
-MENSAGEM DO USUÁRIO: "${message}"
+Responda SOMENTE JSON puro: { "resposta": "...", "acoes": [] }
 
-Responda SOMENTE com JSON puro (sem markdown, sem blocos de código):
-{ "resposta": "mensagem curta para o usuário", "acoes": [] }
+AÇÕES: add_presenca{nick,data} | remove_presenca{nick,data} | add_presenca_todos{data,exceto:[]} | add_ausencia{nick,dataInicio,dataFim,motivo} | remove_ausencia{nick} | change_cargo{nick,cargo:Tutor|Em Teste|Sênior|Inativo|Desligado} | add_obs{nick,obs}
 
-AÇÕES DISPONÍVEIS:
-{ "tipo": "add_presenca", "nick": "...", "data": "YYYY-MM-DD" }
-{ "tipo": "remove_presenca", "nick": "...", "data": "YYYY-MM-DD" }
-{ "tipo": "add_presenca_todos", "data": "YYYY-MM-DD", "exceto": ["nick1"] }
-{ "tipo": "add_ausencia", "nick": "...", "dataInicio": "YYYY-MM-DD", "dataFim": "YYYY-MM-DD", "motivo": "..." }
-{ "tipo": "remove_ausencia", "nick": "..." }
-{ "tipo": "change_cargo", "nick": "...", "cargo": "Tutor|Em Teste|Sênior|Inativo|Desligado" }
-{ "tipo": "add_obs", "nick": "...", "obs": "..." }
-
-══════════════ REGRAS — SIGA NESTA ORDEM ══════════════
-
-🚫 REGRA 1 — DEDUP (MAIS IMPORTANTE):
-Antes de gerar QUALQUER add_presenca, verifique "TODAS AS PRESENÇAS REGISTRADAS" do tutor na lista acima.
-Se a data já está nessa lista → NÃO gere a ação. Informe que já existe. Sem exceções.
-Exemplo: tutor tem [2025-01-10, 2025-01-15] e usuário pede add para 2025-01-10 → acoes:[], responda "já tem presença nessa data".
-
-🚫 REGRA 2 — DATA FUTURA:
-Não adicione presença para datas após ${todayStr} sem avisar explicitamente o usuário.
-
-⚠️ REGRA 3 — AUSÊNCIA ATIVA:
-Se o tutor está AUSENTE e a data cai dentro do período de ausência, avise o usuário antes de executar.
-
-✅ REGRA 4 — NICKS:
-Use EXATAMENTE os nicks da lista. Nunca invente. Se não há match exato → peça confirmação.
-
-✅ REGRA 5 — AÇÃO DIRETA:
-Nick exato + ação clara → execute sem confirmação. Só peça confirmação em ambiguidade real (nick parecido, data incerta).
-
-✅ REGRA 6 — CONFIRMAÇÕES:
-"s", "sim", "ok", "pode", "confirma" e similares = execute EXATAMENTE o que foi proposto na última mensagem do assistente. Nem mais, nem menos.
-
-🚫 REGRA 7 — add_presenca_todos:
-SOMENTE quando o usuário disser EXPLICITAMENTE "todos", "todo mundo", "geral". NUNCA em resposta a confirmação individual.
-
-📊 REGRA 8 — CONSULTAS:
-Para perguntas/análises, acoes:[] e responda em "resposta".
-
-Para "quem não aparece há X dias": tutores com 0d NÃO são inativos. Tutores que entraram hoje têm 0 dias.
-Para múltiplos tutores, gere múltiplas entradas em "acoes".`
+REGRAS (ordem de prioridade):
+1. DEDUP: antes de add_presenca, cheque "TODAS AS PRESENÇAS REGISTRADAS" — se data já existe → acoes:[], informe que já existe. Sem exceções.
+2. DATA FUTURA: não adicione após ${todayStr} sem avisar.
+3. AUSÊNCIA ATIVA: avise se data cai dentro do período de ausência.
+4. NICKS: use exatamente os nicks da lista. Se ambíguo → peça confirmação.
+5. AÇÃO DIRETA: nick+ação claros → execute sem pedir confirmação.
+6. CONFIRMAÇÕES ("sim","ok","pode","confirma"): execute exatamente o proposto na última mensagem. Nem mais, nem menos.
+7. add_presenca_todos: SOMENTE se usuário disser explicitamente "todos"/"todo mundo"/"geral".
+8. CONSULTAS: acoes:[] e responda em "resposta". Tutores com 0d NÃO são inativos. Para múltiplos, gere múltiplas acoes.`
 
   try {
     const genAI = new GoogleGenerativeAI(key)
@@ -686,6 +662,22 @@ Para múltiplos tutores, gere múltiplas entradas em "acoes".`
       }
     }
 
+    // Auditoria: loga cada ação gerada pela IA
+    if (Array.isArray(parsed.acoes) && parsed.acoes.length > 0) {
+      const actor = getDeviceApelido(req) || 'sistema'
+      const server = req.headers['x-server'] || '?'
+      const ACTION_MAP = {
+        add_presenca: 'presenca_add', remove_presenca: 'presenca_remove',
+        add_presenca_todos: 'presenca_add', add_ausencia: 'ausencia_add',
+        remove_ausencia: 'ausencia_remove', change_cargo: 'cargo_change',
+        add_obs: 'obs_add',
+      }
+      for (const a of parsed.acoes) {
+        const auditAction = ACTION_MAP[a.tipo] || a.tipo
+        addAuditLog(actor, auditAction, { server, nick: a.nick || '(todos)', ...(a.data ? { data: a.data } : {}), ...(a.cargo ? { cargo: a.cargo } : {}), via: 'IA' })
+      }
+    }
+
     res.json(parsed)
   } catch {
     res.status(500).json({ error: 'Erro ao processar resposta da IA.' })
@@ -698,9 +690,9 @@ app.post('/api/settings', requireAuth, requireServerAccess, (req, res) => {
   const { settings } = req.body || {}
   if (!settings || typeof settings !== 'object' || Array.isArray(settings))
     return res.status(400).json({ error: 'Dados inválidos' })
-  // Aceita apenas campos conhecidos para evitar prototype pollution
   const { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica } = settings
   setKV(serverKey(req, 'settings'), { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica: atividadeAutomatica !== false })
+  addAuditLog(getDeviceApelido(req) || 'admin', 'settings_save', { server: req.headers['x-server'] || '?', diasParaAlerta, baixaMax, moderadaMax })
   res.json({ ok: true })
 })
 
@@ -710,6 +702,7 @@ app.post('/api/config/apikey', requireAuth, requireAdmin, (req, res) => {
   const { apiKey } = req.body || {}
   if (typeof apiKey !== 'string' || apiKey.length > 256) return res.status(400).json({ error: 'Dados inválidos' })
   setKV('gemini_api_key', apiKey)
+  addAuditLog(getDeviceApelido(req) || 'admin', 'apikey_update', {})
   res.json({ ok: true })
 })
 
@@ -773,6 +766,7 @@ app.post('/api/env/list', requireAuth, requireAdmin, (req, res) => {
       return res.status(400).json({ error: `ID inválido: ${e.id}` })
   }
   setKV('env_list', list)
+  addAuditLog(getDeviceApelido(req) || 'admin', 'env_list_update', { count: list.length, names: list.map(e => e.name) })
   res.json({ ok: true })
 })
 
@@ -804,6 +798,11 @@ app.post('/api/env/config/:serverId', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true })
 })
 
+// ── Audit log ─────────────────────────────────────────────────────────────────
+app.get('/api/audit/logs', requireAuth, requireAdmin, (_req, res) => {
+  res.json(getAuditLog())
+})
+
 // ── Admin config ───────────────────────────────────────────────────────────────
 app.get('/api/admin/config', requireAuth, requireAdmin, (_req, res) => {
   res.json({ adminApelidos: getAdminApelidos() })
@@ -817,7 +816,9 @@ app.post('/api/admin/apelidos', requireAuth, requireAdmin, (req, res) => {
   const { apelidos } = req.body || {}
   if (!Array.isArray(apelidos) || apelidos.some(a => typeof a !== 'string' || a.length > 40))
     return res.status(400).json({ error: 'Dados inválidos' })
-  setKV('admin_apelidos', apelidos.filter(a => a.trim()))
+  const updated = apelidos.filter(a => a.trim())
+  setKV('admin_apelidos', updated)
+  addAuditLog(getDeviceApelido(req) || 'admin', 'admin_apelidos_update', { apelidos: updated })
   res.json({ ok: true })
 })
 
@@ -831,11 +832,12 @@ app.post('/api/auth/devices/:token/permissions', requireAuth, requireAdmin, (req
   if (!getDevices()[token]) return res.status(404).json({ error: 'Dispositivo não encontrado' })
   const { role, allowedServers } = req.body || {}
   const perms = getDevicePerms()
-  perms[token] = {
-    role: ['full', 'senior'].includes(role) ? role : 'senior',
-    allowedServers: Array.isArray(allowedServers) && allowedServers.length > 0 ? allowedServers : null,
-  }
+  const finalRole = ['full', 'senior'].includes(role) ? role : 'senior'
+  const finalServers = Array.isArray(allowedServers) && allowedServers.length > 0 ? allowedServers : null
+  perms[token] = { role: finalRole, allowedServers: finalServers }
   setDevicePerms(perms)
+  const targetApelido = getDevices()[token]?.apelido || token.slice(0, 8)
+  addAuditLog(getDeviceApelido(req) || 'admin', 'device_permissions', { target: targetApelido, role: finalRole, allowedServers: finalServers })
   res.json({ ok: true })
 })
 

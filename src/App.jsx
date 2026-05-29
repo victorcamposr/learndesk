@@ -14,7 +14,7 @@ import {
   CalendarCheck, CalendarPlus, Bell, Settings, Bot, Send, Mail,
   Globe, Rocket, ArrowLeftRight, LayoutGrid, List,
   Lock, Crown, Palette, Swords, Download,
-  Flame, Zap, Star, Gem,
+  Flame, Zap, Star, Gem, Monitor, BookOpen,
 } from 'lucide-react'
 
 const mkRoman = r => ({ size = 16, color = 'currentColor' }) => (
@@ -3657,6 +3657,177 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   )
 }
 
+// ── AuditoriaPanel ────────────────────────────────────────────────────────────
+const AUDIT_LABELS = {
+  login:                  { label: 'Login',                  color: C.teal },
+  logout:                 { label: 'Logout',                 color: C.textMuted },
+  password_set:           { label: 'Senha definida',         color: '#3b82f6' },
+  device_approve:         { label: 'Dispositivo aprovado',   color: '#10b981' },
+  device_deny:            { label: 'Dispositivo negado',     color: '#ef4444' },
+  device_delete:          { label: 'Dispositivo excluído',   color: '#ef4444' },
+  device_permissions:     { label: 'Permissões alteradas',   color: C.gold },
+  ip_revoke:              { label: 'IP revogado',            color: '#f97316' },
+  admin_apelidos_update:  { label: 'Admins atualizados',     color: C.primaryBright },
+  tutores_save:           { label: 'Tutores salvos',         color: C.textSoft },
+  tutor_add:              { label: 'Tutor adicionado',       color: '#10b981' },
+  tutor_edit:             { label: 'Tutor editado',          color: C.gold },
+  tutor_delete:           { label: 'Tutor removido',         color: '#ef4444' },
+  cargo_change:           { label: 'Cargo alterado',         color: '#8b5cf6' },
+  presenca_add:           { label: 'Presença adicionada',    color: '#10b981' },
+  presenca_remove:        { label: 'Presença removida',      color: '#f97316' },
+  ausencia_add:           { label: 'Ausência registrada',    color: '#3b82f6' },
+  ausencia_remove:        { label: 'Ausência removida',      color: '#10b981' },
+  obs_add:                { label: 'Obs. adicionada',        color: C.textSoft },
+  settings_save:          { label: 'Configurações salvas',   color: C.primaryBright },
+  apikey_update:          { label: 'API Key atualizada',     color: '#8b5cf6' },
+  env_list_update:        { label: 'Ambientes atualizados',  color: C.gold },
+}
+
+function formatAuditDetails(action, details) {
+  if (!details || Object.keys(details).length === 0) return null
+  const parts = []
+  if (details.nick) parts.push(details.nick)
+  if (details.apelido) parts.push(details.apelido)
+  if (details.target) parts.push(`→ ${details.target}`)
+  if (details.cargo) parts.push(details.cargo)
+  if (details.ip) parts.push(details.ip)
+  if (details.server) parts.push(details.server)
+  if (details.role) parts.push(details.role)
+  if (details.count !== undefined) parts.push(`${details.count} tutores`)
+  if (details.apelidos) parts.push(details.apelidos.join(', '))
+  if (details.names) parts.push(details.names.join(', '))
+  if (details.allowedServers) parts.push(`servidores: ${details.allowedServers.join(', ')}`)
+  return parts.length ? parts.join(' · ') : null
+}
+
+function AuditoriaPanel() {
+  const [logs, setLogs]         = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [search, setSearch]     = useState('')
+  const [typeFilter, setFilter] = useState('all')
+  const [page, setPage]         = useState(0)
+  const PAGE_SIZE = 25
+
+  useEffect(() => {
+    apiFetch('/api/audit/logs')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { setLogs(data); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const categories = [
+    { key: 'all',       label: 'Todos' },
+    { key: 'auth',      label: 'Autenticação' },
+    { key: 'devices',   label: 'Dispositivos' },
+    { key: 'tutores',   label: 'Tutores' },
+    { key: 'admin',     label: 'Admin' },
+    { key: 'settings',  label: 'Config' },
+  ]
+  const AUTH_ACTIONS    = new Set(['login','logout','password_set'])
+  const DEVICE_ACTIONS  = new Set(['device_approve','device_deny','device_delete','device_permissions','ip_revoke'])
+  const TUTOR_ACTIONS   = new Set(['tutores_save','tutor_add','tutor_edit','tutor_delete','cargo_change','presenca_add','presenca_remove','ausencia_add','ausencia_remove','obs_add'])
+  const ADMIN_ACTIONS   = new Set(['admin_apelidos_update','apikey_update','env_list_update'])
+  const SETTINGS_ACTIONS = new Set(['settings_save'])
+
+  const matchCategory = (action) => {
+    if (typeFilter === 'all') return true
+    if (typeFilter === 'auth')     return AUTH_ACTIONS.has(action)
+    if (typeFilter === 'devices')  return DEVICE_ACTIONS.has(action)
+    if (typeFilter === 'tutores')  return TUTOR_ACTIONS.has(action)
+    if (typeFilter === 'admin')    return ADMIN_ACTIONS.has(action)
+    if (typeFilter === 'settings') return SETTINGS_ACTIONS.has(action)
+    return true
+  }
+
+  const q = search.trim().toLowerCase()
+  const filtered = logs.filter(e => {
+    if (!matchCategory(e.action)) return false
+    if (!q) return true
+    const label = (AUDIT_LABELS[e.action]?.label || e.action).toLowerCase()
+    const det = formatAuditDetails(e.action, e.details) || ''
+    return label.includes(q) || (e.actor || '').toLowerCase().includes(q) || det.toLowerCase().includes(q)
+  })
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+
+  const fmtTs = ts => {
+    const d = new Date(ts)
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  if (loading) return (
+    <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+      <Loader2 size={20} color={C.primaryBright} style={{ animation: 'spin 1s linear infinite' }} />
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Filtros */}
+      <div style={{ position: 'relative' }}>
+        <Search size={12} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: C.textMuted, pointerEvents: 'none' }} />
+        <input value={search} onChange={e => { setSearch(e.target.value); setPage(0) }} placeholder="Filtrar por ação, usuário ou detalhe…"
+          style={{ ...inputBase, paddingLeft: 28, borderRadius: 10, width: '100%', fontSize: 12 }} />
+      </div>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+        {categories.map(({ key, label }) => (
+          <button key={key} onClick={() => { setFilter(key); setPage(0) }} style={{
+            fontSize: 11, padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
+            background: typeFilter === key ? `${C.primaryBright}22` : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${typeFilter === key ? C.primaryBright + '60' : C.border}`,
+            color: typeFilter === key ? C.primaryBright : C.textMuted,
+            fontWeight: typeFilter === key ? 700 : 400,
+          }}>{label}</button>
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: C.textMuted, alignSelf: 'center' }}>
+          {filtered.length} evento{filtered.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* Lista */}
+      {paged.length === 0 ? (
+        <div style={{ textAlign: 'center', color: C.textMuted, fontSize: 13, padding: 20 }}>
+          {search || typeFilter !== 'all' ? 'Nenhum evento encontrado.' : 'Sem registros ainda.'}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 420, overflowY: 'auto' }}>
+          {paged.map(e => {
+            const info = AUDIT_LABELS[e.action] || { label: e.action, color: C.textMuted }
+            const det = formatAuditDetails(e.action, e.details)
+            return (
+              <div key={e.id} style={{
+                display: 'grid', gridTemplateColumns: '90px 1fr auto', gap: 8, alignItems: 'center',
+                background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`,
+                borderLeft: `3px solid ${info.color}40`, borderRadius: 8, padding: '7px 10px',
+                fontSize: 12,
+              }}>
+                <span style={{ color: C.textMuted, fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>{fmtTs(e.ts)}</span>
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ color: info.color, fontWeight: 600, marginRight: 6 }}>{info.label}</span>
+                  {e.actor && <span style={{ color: C.textSoft, fontSize: 11 }}>por <strong style={{ color: C.text }}>{e.actor}</strong></span>}
+                  {det && <div style={{ color: C.textMuted, fontSize: 10, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{det}</div>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Paginação */}
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', gap: 6, justifyContent: 'center', alignItems: 'center', paddingTop: 4 }}>
+          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+            style={{ ...btn('ghost'), padding: '4px 10px', fontSize: 11, opacity: page === 0 ? 0.4 : 1 }}>‹ Ant.</button>
+          <span style={{ fontSize: 11, color: C.textMuted }}>{page + 1} / {totalPages}</span>
+          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}
+            style={{ ...btn('ghost'), padding: '4px 10px', fontSize: 11, opacity: page === totalPages - 1 ? 0.4 : 1 }}>Próx. ›</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── SettingsModal ─────────────────────────────────────────────────────────────
 function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, envConfigs, meInfo, onUpdateEnv }) {
   const [form, setForm] = useState({ ...DEFAULT_CFG })
@@ -3688,19 +3859,20 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
   )
 
   return (
-    <Modal open={open} onClose={onClose} title="Configurações" icon={Settings} maxWidth={520}>
+    <Modal open={open} onClose={onClose} title="Configurações" icon={Settings} maxWidth={tab === 'auditoria' ? 680 : 520}>
       {/* Tabs */}
       {(() => {
         const isSenior = meInfo?.role === 'senior' && !meInfo?.isAdmin
         const isAdmin  = meInfo?.isAdmin
         const baseTabs = isSenior ? [
-          { key: 'config', label: 'Regras', icon: Activity },
+          { key: 'config', label: 'Regras', icon: BookOpen },
         ] : isAdmin ? [
-          { key: 'config',  label: 'Regras',       icon: Activity },
-          { key: 'mundos',  label: 'Mundos',        icon: Swords },
-          { key: 'devices', label: 'Dispositivos',  icon: Globe },
+          { key: 'config',     label: 'Regras',       icon: BookOpen },
+          { key: 'mundos',     label: 'Mundos',        icon: Swords },
+          { key: 'devices',    label: 'Dispositivos',  icon: Monitor },
+          { key: 'auditoria',  label: 'Auditoria',     icon: ClipboardList },
         ] : [
-          { key: 'config', label: 'Regras',  icon: Activity },
+          { key: 'config', label: 'Regras',  icon: BookOpen },
           { key: 'mundos', label: 'Mundos',  icon: Swords },
         ]
         const allTabs = baseTabs
@@ -3722,8 +3894,9 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
         )
       })()}
 
-      {tab === 'devices' ? <DevicesPanel servers={servers} meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> :
-       tab === 'mundos'  ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> : (
+      {tab === 'devices'   ? <DevicesPanel servers={servers} meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> :
+       tab === 'mundos'    ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> :
+       tab === 'auditoria' ? <AuditoriaPanel /> : (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
         {/* Toggle atividade automática */}
@@ -3788,13 +3961,13 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
           </div>
         </div>}
 
-        {/* Alertas */}
-        <div>
+        {/* Alertas — só visível quando atividade automática */}
+        {form.atividadeAutomatica && <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Bell size={12} /> Alertas de Presença
           </div>
           {numInput('Dias sem presença para alertar', 'diasParaAlerta', 1, 'Tutor com mais dias inativo que esse valor recebe alerta')}
-        </div>
+        </div>}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
           <button style={btn('ghost')} onClick={onClose}><X size={14} /> Cancelar</button>
