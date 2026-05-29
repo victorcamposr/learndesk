@@ -1210,7 +1210,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
           )}
 
           {/* Presença hoje */}
-          <div style={{ position: 'relative' }}>
+          {_cfg.atividadeAutomatica && <div style={{ position: 'relative' }}>
             <HoverTooltip content={<span style={{ fontSize: 12, color: C.text }}>{jaRegistrou ? 'Presença registrada hoje · clique para remover' : 'Registrar presença hoje'}</span>} width={220}>
               <button
                 style={{
@@ -1256,7 +1256,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
                 </div>
               </>
             )}
-          </div>
+          </div>}
 
           <HoverTooltip content={<span style={{ fontSize: 12, color: C.text }}>Editar tutor</span>} width={110}>
             <button style={{ ...btn('subtle', 'sm'), color: C.textMuted }} onClick={() => onEdit(tutor.id)}>
@@ -1492,7 +1492,7 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
         )}
 
         {/* Presença */}
-        <div style={{ position: 'relative' }}>
+        {_cfg.atividadeAutomatica && <div style={{ position: 'relative' }}>
           <HoverTooltip width={220} side="top" content={
             <span style={{ fontSize: 12, color: C.text }}>
               {jaRegistrou ? 'Presença registrada hoje · clique para remover' : 'Registrar presença hoje'}
@@ -1529,7 +1529,7 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
               </div>
             </>
           )}
-        </div>
+        </div>}
 
         <HoverTooltip width={110} side="top" content={<span style={{ fontSize: 12, color: C.text }}>Editar tutor</span>}>
           <button style={{ ...btn('subtle', 'sm'), color: C.textMuted }} onClick={() => onEdit(tutor.id)}>
@@ -2210,9 +2210,8 @@ function SummaryCard({ label, value, sub, color, icon: Icon }) {
 }
 
 // ── IAModal ───────────────────────────────────────────────────────────────────
-function IAModal({ open, onClose, tutores, apiKey: apiKeyProp, onSaveApiKey }) {
-  const [apiKey, setApiKey]     = useState(apiKeyProp || '')
-  useEffect(() => { setApiKey(apiKeyProp || '') }, [apiKeyProp])
+function IAModal({ open, onClose, tutores, apiKeyConfigured, onSaveApiKey }) {
+  const [newKey, setNewKey] = useState('')
   const [showKey, setShowKey]   = useState(false)
   const [analyses, setAnalyses] = useState([])
   const [current, setCurrent]   = useState(null)
@@ -2230,7 +2229,7 @@ function IAModal({ open, onClose, tutores, apiKey: apiKeyProp, onSaveApiKey }) {
   const handleAnalyze = async () => {
     setLoading(true); setError('')
     try {
-      if (apiKey.trim()) onSaveApiKey(apiKey.trim())
+      if (newKey.trim()) onSaveApiKey(newKey.trim())
       const res = await apiFetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2275,8 +2274,8 @@ function IAModal({ open, onClose, tutores, apiKey: apiKeyProp, onSaveApiKey }) {
       <div style={{ marginBottom: 14, background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <AtSign size={13} color={C.textMuted} />
-          <span style={{ fontSize: 12, color: apiKey ? '#34d399' : C.textSoft, flex: 1 }}>
-            {apiKey ? 'Chave Google Gemini configurada' : 'Chave Google Gemini não configurada'}
+          <span style={{ fontSize: 12, color: (apiKeyConfigured || newKey) ? '#34d399' : C.textSoft, flex: 1 }}>
+            {(apiKeyConfigured || newKey) ? 'Chave Google Gemini configurada' : 'Chave Google Gemini não configurada'}
           </span>
           <button style={btn('ghost', 'sm')} onClick={() => setShowKey(v => !v)}>
             {showKey ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -2285,8 +2284,9 @@ function IAModal({ open, onClose, tutores, apiKey: apiKeyProp, onSaveApiKey }) {
         </div>
         {showKey && (
           <input style={{ ...inputBase, marginTop: 10, fontSize: 12, fontFamily: 'monospace' }}
-            type="password" placeholder="AIzaSy..." value={apiKey}
-            onChange={e => setApiKey(e.target.value)} autoFocus />
+            type="password" placeholder={apiKeyConfigured ? 'Nova chave (deixe vazio para manter)' : 'AIzaSy...'}
+            value={newKey}
+            onChange={e => setNewKey(e.target.value)} autoFocus />
         )}
       </div>
 
@@ -2974,7 +2974,7 @@ function PresencaHistoricoChart({ tutores }) {
 }
 
 // ── DashboardTab ──────────────────────────────────────────────────────────────
-function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
+function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envConfigs }) {
   const [sortAsc, setSortAsc] = useState(false)
   const [pagamentoOpen, setPagamentoOpen] = useState(false)
 
@@ -4692,7 +4692,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
 }
 
 // ── FloatingChat ──────────────────────────────────────────────────────────────
-function FloatingChat({ tutores, setTutores, apiKey }) {
+function FloatingChat({ tutores, setTutores }) {
   const [open, setOpen]       = useState(false)
   const [input, setInput]     = useState('')
   const [loading, setLoading] = useState(false)
@@ -5453,7 +5453,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
   const [dataLoaded, setDataLoaded]     = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab]   = useState('config')
-  const [apiKey, setApiKey]             = useState('')
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false)
 
   const [pendingDevices, setPendingDevices] = useState(0)
 
@@ -5482,7 +5482,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
   }
 
   const handleSaveApiKey = key => {
-    setApiKey(key)
+    setApiKeyConfigured(true)
     apiFetch('/api/config/apikey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key }) })
   }
 
@@ -5496,7 +5496,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
       setTutores(Array.isArray(tutoresData) ? tutoresData : [])
       if (settingsData && !settingsData.error && Object.keys(settingsData).length > 0)
         _cfg = { ...DEFAULT_CFG, ...settingsData }
-      if (apikeyData?.apiKey) setApiKey(apikeyData.apiKey)
+      if (apikeyData?.configured) setApiKeyConfigured(true)
     }).catch(() => setTutores([]))
       .finally(() => setDataLoaded(true))
   }, [])
@@ -5559,7 +5559,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
           ) : (
             <>
               {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} />}
-              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKey={apiKey} onSaveApiKey={handleSaveApiKey} servers={serversProp} envConfigs={envConfigs} />}
+              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKeyConfigured={apiKeyConfigured} onSaveApiKey={handleSaveApiKey} servers={serversProp} envConfigs={envConfigs} />}
             </>
           )}
         </main>
@@ -5599,7 +5599,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
           <span style={{ fontSize: 11, color: C.textMuted }}>→ Gerenciar</span>
         </button>
       )}
-      <FloatingChat tutores={tutores} setTutores={setTutores} apiKey={apiKey} />
+      <FloatingChat tutores={tutores} setTutores={setTutores} />
     </div>
   )
 }
