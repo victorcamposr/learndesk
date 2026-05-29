@@ -3010,19 +3010,14 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
     ATIVIDADES.map(a => ({ name: a, total: tutores.filter(t => getAtividade(t) === a).length }))
   , [tutores])
 
-  const PERIODO_SLOT_COLORS = {
-    'Manhã · Sem':  '#818cf8', 'Tarde · Sem':  '#6366f1', 'Noite · Sem':  '#4f46e5',
-    'Manhã · FDS':  '#fbbf24', 'Tarde · FDS':  '#f59e0b', 'Noite · FDS':  '#d97706',
-  }
-  const PERIODO_SLOT_KEYS = ['Manhã · Sem', 'Tarde · Sem', 'Noite · Sem', 'Manhã · FDS', 'Tarde · FDS', 'Noite · FDS']
   const periodoData = useMemo(() => {
-    const map = Object.fromEntries(PERIODO_SLOT_KEYS.map(k => [k, 0]))
+    const map = Object.fromEntries(PERIODOS.map(p => [p, { Semana: 0, FDS: 0 }]))
     tutores.forEach(t => {
       const { semana, fds } = parseHorarios(t.horarios)
-      semana.forEach(p => { if (map[`${p} · Sem`] !== undefined) map[`${p} · Sem`]++ })
-      fds.forEach(p =>   { if (map[`${p} · FDS`] !== undefined) map[`${p} · FDS`]++ })
+      semana.forEach(p => { if (map[p]) map[p].Semana++ })
+      fds.forEach(p =>   { if (map[p]) map[p].FDS++ })
     })
-    return PERIODO_SLOT_KEYS.map(name => ({ name, total: map[name], color: PERIODO_SLOT_COLORS[name] })).filter(d => d.total > 0)
+    return PERIODOS.map(p => ({ name: p, Semana: map[p].Semana, FDS: map[p].FDS }))
   }, [tutores])
 
   const entradaMesData = useMemo(() => {
@@ -3179,17 +3174,26 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
           {
             title: 'Tutores por Período', Icon: Clock,
             content: (
-              <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={periodoData} layout="vertical" margin={{ top: 5, right: 20, left: 100, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false} />
-                  <XAxis type="number" tick={{ fill: C.textSoft, fontSize: 11 }} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" tick={{ fill: C.textSoft, fontSize: 11 }} width={100} />
-                  <Tooltip content={<RechartTooltip />} />
-                  <Bar dataKey="total" name="Tutores" radius={[0, 5, 5, 0]}>
-                    {periodoData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <>
+                <div style={{ display: 'flex', gap: 16, marginBottom: 12, justifyContent: 'flex-end' }}>
+                  {[['Semana', C.primaryBright], ['FDS', C.gold]].map(([label, color]) => (
+                    <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 3, background: color }} />
+                      <span style={{ fontSize: 11, color: C.textSoft }}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={periodoData} margin={{ top: 0, right: 10, left: -20, bottom: 0 }} barCategoryGap="28%">
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+                    <XAxis dataKey="name" tick={{ fill: C.textSoft, fontSize: 12 }} />
+                    <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} allowDecimals={false} />
+                    <Tooltip content={<RechartTooltip />} />
+                    <Bar dataKey="Semana" name="Semana" fill={C.primaryBright} radius={[5, 5, 0, 0]} />
+                    <Bar dataKey="FDS" name="FDS" fill={C.gold} radius={[5, 5, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </>
             ),
           },
           {
