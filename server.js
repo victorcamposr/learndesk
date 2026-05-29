@@ -34,21 +34,12 @@ const checkPwd = (plain, stored) => bcrypt.compareSync(plain, stored)
 
 const TOKEN_TTL = 7 * 24 * 60 * 60 * 1000 // 7 dias
 
-const getTrustedIPs = () => getKV('trusted_ips') || {}
-const setTrustedIPs = t => setKV('trusted_ips', t)
+const getTrustedIPs    = () => getKV('trusted_ips') || {}
+const setTrustedIPs    = t  => setKV('trusted_ips', t)
+const getUserPasswords  = () => getKV('user_passwords') || {}
+const setUserPasswords  = p  => setKV('user_passwords', p)
 
 const initAuth = () => {
-  if (!process.env.ADMIN_PASSWORD) {
-    console.error('❌ ADMIN_PASSWORD não definida no .env. Defina-a antes de iniciar o servidor.')
-    process.exit(1)
-  }
-  const stored = getKV('password_hash')
-  const needsUpdate = !stored || !stored.startsWith('$2') || !bcrypt.compareSync(process.env.ADMIN_PASSWORD, stored)
-  if (needsUpdate) {
-    setKV('password_hash', hashPwd(process.env.ADMIN_PASSWORD))
-    console.log('🔑 Hash de senha sincronizado.')
-  }
-
   // IPs pré-confiáveis definidos no .env (TRUSTED_IPS=ip1,ip2,...)
   if (process.env.TRUSTED_IPS) {
     const trusted = getTrustedIPs()
@@ -301,14 +292,21 @@ const geminiLimiter = IS_TEST ? noopMiddleware : rateLimit({
 app.post('/api/auth/login', loginLimiter, (req, res) => {
   const { password, deviceToken } = req.body || {}
 
-  // Verifica dispositivo antes da senha (não revela qual falhou)
   const devices = getDevices()
-  const deviceOk = deviceToken && typeof deviceToken === 'string' &&
-    devices[deviceToken]?.status === 'approved'
+  const device = deviceToken && typeof deviceToken === 'string' ? devices[deviceToken] : null
+  if (!device || device.status !== 'approved')
+    return res.status(401).json({ error: 'Dispositivo não autorizado.' })
 
-  if (!password || typeof password !== 'string' || password.length > 128 || !deviceOk ||
-    !checkPwd(password, getKV('password_hash')))
-    return res.status(401).json({ error: 'Senha incorreta ou dispositivo não autorizado.' })
+  const apelido = device.apelido
+  if (!apelido)
+    return res.status(401).json({ error: 'Dispositivo sem apelido.' })
+
+  const hash = getUserPasswords()[apelido]
+  if (!hash)
+    return res.status(401).json({ error: 'Senha não definida.' })
+
+  if (!password || typeof password !== 'string' || password.length > 128 || !checkPwd(password, hash))
+    return res.status(401).json({ error: 'Senha incorreta.' })
 
   const token = randomBytes(32).toString('hex')
   const expires = Date.now() + TOKEN_TTL
@@ -320,6 +318,41 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
   sessions[deviceToken] = { token, expires }
   setKV('session_tokens', sessions)
 
+  res.json({ ok: true, token })
+})
+
+app.post('/api/auth/set-password', async (req, res) => {
+  const { deviceToken, password } = req.body || {}
+
+  const devices = getDevices()
+  const device = deviceToken && typeof deviceToken === 'string' ? devices[deviceToken] : null
+  if (!device || device.status !== 'approved')
+    return res.status(401).json({ error: 'Dispositivo não autorizado.' })
+
+  const apelido = device.apelido
+  if (!apelido)
+    return res.status(400).json({ error: 'Dispositivo sem apelido configurado.' })
+
+  if (!password || typeof password !== 'string' || password.length < 6 || password.length > 128)
+    return res.status(400).json({ error: 'Senha deve ter entre 6 e 128 caracteres.' })
+
+  const userPasswords = getUserPasswords()
+  if (userPasswords[apelido])
+    return res.status(400).json({ error: 'Senha já definida para este usuário.' })
+
+  userPasswords[apelido] = hashPwd(password)
+  setUserPasswords(userPasswords)
+
+  const token = randomBytes(32).toString('hex')
+  const expires = Date.now() + TOKEN_TTL
+  const sessions = getKV('session_tokens') || {}
+  for (const [dt, s] of Object.entries(sessions)) {
+    if (s.expires && Date.now() > s.expires) delete sessions[dt]
+  }
+  sessions[deviceToken] = { token, expires }
+  setKV('session_tokens', sessions)
+
+  console.log(`🔑 Senha definida para: ${apelido}`)
   res.json({ ok: true, token })
 })
 
@@ -420,7 +453,12 @@ app.post('/api/auth/device-status', deviceStatusLimiter, (req, res) => {
   const { deviceToken } = req.body || {}
   if (!deviceToken || typeof deviceToken !== 'string') return res.json({ status: 'unknown' })
   const device = getDevices()[deviceToken]
-  res.json({ status: device?.status || 'unknown' })
+  if (!device) return res.json({ status: 'unknown' })
+  const result = { status: device.status, apelido: device.apelido || '' }
+  if (device.status === 'approved' && device.apelido) {
+    result.needsPassword = !getUserPasswords()[device.apelido]
+  }
+  res.json(result)
 })
 
 app.get('/api/auth/devices', requireAuth, (_req, res) => {

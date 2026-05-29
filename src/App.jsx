@@ -77,9 +77,9 @@ const TOKEN_KEY     = 'rubinot_token'
 const SERVER_KEY    = 'rubinot_server'
 const DEVICE_KEY    = 'rubinot_device'
 const DENIED_AT_KEY = 'rubinot_denied_at'
-const getToken       = () => sessionStorage.getItem(TOKEN_KEY)
-const saveToken      = t => sessionStorage.setItem(TOKEN_KEY, t)
-const clearToken     = () => sessionStorage.removeItem(TOKEN_KEY)
+const getToken       = () => localStorage.getItem(TOKEN_KEY)
+const saveToken      = t => localStorage.setItem(TOKEN_KEY, t)
+const clearToken     = () => localStorage.removeItem(TOKEN_KEY)
 const getServer      = () => localStorage.getItem(SERVER_KEY)
 const saveServer     = s => localStorage.setItem(SERVER_KEY, s)
 const getDeviceToken  = () => localStorage.getItem(DEVICE_KEY) || sessionStorage.getItem(DEVICE_KEY)
@@ -5194,7 +5194,82 @@ function DeviceDeniedScreen() {
   )
 }
 
-function LoginScreen({ onLogin, justApproved }) {
+function SetPasswordScreen({ apelido, onDone }) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm]   = useState('')
+  const [error, setError]       = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [show, setShow]         = useState(false)
+  const inputRef = useRef(null)
+  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 80) }, [])
+
+  const handleSubmit = async e => {
+    e.preventDefault()
+    if (password.length < 6) { setError('Mínimo 6 caracteres.'); return }
+    if (password !== confirm) { setError('As senhas não coincidem.'); return }
+    setLoading(true); setError('')
+    try {
+      const res = await fetch(API + '/api/auth/set-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, deviceToken: getDeviceToken() }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || 'Erro ao definir senha'); return }
+      if (data.token) saveToken(data.token)
+      onDone()
+    } catch {
+      setError('Erro de conexão com o servidor')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
+      <BackgroundImage />
+      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 360, padding: '0 16px' }}>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: '40px 32px', backdropFilter: 'blur(16px)', boxShadow: '0 8px 48px rgba(0,0,0,0.5)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 28 }}>
+            <img src={`${BASE}files/logo.webp`} alt="Rubinot" style={{ width: 100, height: 100, objectFit: 'contain', marginBottom: 12, filter: 'drop-shadow(0 0 18px rgba(99,102,241,0.5))' }} />
+            <div style={{ fontSize: 16, fontWeight: 700, color: C.text, fontFamily: 'Cinzel, serif' }}>Crie sua senha</div>
+            {apelido && <div style={{ fontSize: 13, color: C.gold, marginTop: 4 }}>Olá, {apelido}!</div>}
+            <div style={{ fontSize: 12, color: C.textMuted, marginTop: 8, textAlign: 'center', lineHeight: 1.6 }}>
+              Primeiro acesso — defina uma senha pessoal para entrar sempre que quiser.
+            </div>
+          </div>
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 11, color: C.textMuted, marginBottom: 6, letterSpacing: 1, textTransform: 'uppercase' }}>Nova senha</label>
+              <div style={{ position: 'relative' }}>
+                <input ref={inputRef} type={show ? 'text' : 'password'} value={password}
+                  onChange={e => { setPassword(e.target.value); setError('') }} placeholder="Mínimo 6 caracteres"
+                  style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(99,102,241,0.07)', border: `1px solid ${error ? '#ef4444' : C.border}`, borderRadius: 8, padding: '10px 40px 10px 14px', color: C.text, fontSize: 15, outline: 'none' }}
+                />
+                <button type="button" onClick={() => setShow(s => !s)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, display: 'flex', alignItems: 'center' }}>
+                  {show ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 11, color: C.textMuted, marginBottom: 6, letterSpacing: 1, textTransform: 'uppercase' }}>Confirmar senha</label>
+              <input type={show ? 'text' : 'password'} value={confirm}
+                onChange={e => { setConfirm(e.target.value); setError('') }} placeholder="Repita a senha"
+                style={{ width: '100%', boxSizing: 'border-box', background: 'rgba(99,102,241,0.07)', border: `1px solid ${error ? '#ef4444' : C.border}`, borderRadius: 8, padding: '10px 14px', color: C.text, fontSize: 15, outline: 'none' }}
+              />
+              {error && <div style={{ fontSize: 12, color: '#ef4444', marginTop: 6 }}>{error}</div>}
+            </div>
+            <button type="submit" disabled={loading || !password || !confirm} style={{ width: '100%', padding: '11px 0', borderRadius: 8, cursor: loading || !password || !confirm ? 'not-allowed' : 'pointer', background: loading || !password || !confirm ? 'rgba(99,102,241,0.3)' : `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`, border: 'none', color: '#fff', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              {loading ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Salvando...</> : 'Definir senha e entrar'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LoginScreen({ apelido, onLogin, justApproved }) {
   const [password, setPassword]     = useState('')
   const [error, setError]           = useState('')
   const [loading, setLoading]       = useState(false)
@@ -5211,7 +5286,6 @@ function LoginScreen({ onLogin, justApproved }) {
     try {
       const res = await fetch(API + '/api/auth/login', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, deviceToken: getDeviceToken() }),
       })
@@ -5246,12 +5320,13 @@ function LoginScreen({ onLogin, justApproved }) {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 32 }}>
             <img src={`${BASE}files/logo.webp`} alt="Rubinot" style={{ width: 150, height: 150, objectFit: 'contain', display: 'block', marginBottom: 12, filter: 'drop-shadow(0 0 18px rgba(99,102,241,0.5))' }} />
             <div style={{ fontSize: 13, color: C.textMuted, textAlign: 'center' }}>Painel Administrativo</div>
+            {apelido && <div style={{ fontSize: 13, color: C.gold, marginTop: 6 }}>Olá, {apelido}!</div>}
           </div>
 
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'block', fontSize: 11, color: C.textMuted, marginBottom: 6, letterSpacing: 1, textTransform: 'uppercase' }}>
-                Senha de acesso
+                Sua senha
               </label>
               <div style={{ position: 'relative' }}>
                 <input
@@ -5302,6 +5377,7 @@ function AuthGate() {
   const [envConfigs, setEnvConfigs]     = useState({})
   const [meInfo, setMeInfo]             = useState({ apelido: '', isAdmin: false })
   const [adminSkipMsg, setAdminSkipMsg] = useState('')
+  const [deviceApelido, setDeviceApelido] = useState('')
   const wasAwaitingRef                  = useRef(false)
 
   useEffect(() => {
@@ -5348,9 +5424,12 @@ function AuthGate() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceToken }),
       })
-      const { status: ds } = await r.json()
+      const { status: ds, apelido: ap, needsPassword } = await r.json()
 
       if (ds === 'approved') {
+        if (ap) setDeviceApelido(ap)
+        if (needsPassword) { setStatus('set-password'); return }
+
         const authToken = getToken()
         const vr = await fetch(API + '/api/auth/verify', {
           headers: {
@@ -5458,7 +5537,8 @@ function AuthGate() {
   if (status === 'request-access') return <DeviceRequestScreen onRequest={handleRequestAccess} />
   if (status === 'awaiting') return <DeviceAwaitingScreen onRetry={checkDevice} />
   if (status === 'denied') return <DeviceDeniedScreen />
-  if (status === 'login') return <LoginScreen onLogin={handleLogin} justApproved={justApproved} />
+  if (status === 'set-password') return <SetPasswordScreen apelido={deviceApelido} onDone={handleLogin} />
+  if (status === 'login') return <LoginScreen apelido={deviceApelido} onLogin={handleLogin} justApproved={justApproved} />
   if (status === 'server-select') return (
     <ServerSelectScreen
       onSelect={handleSelectServer}
