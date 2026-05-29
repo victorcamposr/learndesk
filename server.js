@@ -43,16 +43,6 @@ const initAuth = () => {
 }
 initAuth()
 
-// Inicializa hash da senha mestre padrão
-const HARDCODED_MASTER = '#senhamestrefoda2026'
-const initMasterPassword = () => {
-  if (!getKV('master_password_hash')) {
-    setKV('master_password_hash', hashPwd(HARDCODED_MASTER))
-    console.log('🔑 Hash da senha mestre inicializado.')
-  }
-}
-initMasterPassword()
-
 const DEFAULT_ENV_LIST = [
   { id: 'grimoria-1', name: 'Grimoria I',   roman: 'I',   color: '#6366f1' },
   { id: 'grimoria-2', name: 'Grimoria II',  roman: 'II',  color: '#f59e0b' },
@@ -671,9 +661,7 @@ app.get('/api/env/configs', requireAuth, (_req, res) => {
   const configs = {}
   for (const env of envs) {
     configs[env.id] = {
-      locked:      getKV(`env_locked:${env.id}`) === true,
-      hasPassword: !!getKV(`env_password:${env.id}`),
-      customName:  getKV(`env_name:${env.id}`) || null,
+      customName: getKV(`env_name:${env.id}`) || null,
     }
   }
   res.json(configs)
@@ -684,7 +672,7 @@ app.post('/api/env/config/:serverId', requireAuth, (req, res) => {
   if (!getValidServers().includes(serverId))
     return res.status(400).json({ error: 'Servidor inválido' })
 
-  const { name, locked, password } = req.body || {}
+  const { name } = req.body || {}
 
   if (name !== undefined) {
     if (typeof name !== 'string' || name.length > 60)
@@ -692,53 +680,12 @@ app.post('/api/env/config/:serverId', requireAuth, (req, res) => {
     setKV(`env_name:${serverId}`, name.trim() || null)
   }
 
-  if (locked !== undefined) {
-    setKV(`env_locked:${serverId}`, locked === true)
-  }
-
-  if (password !== undefined) {
-    if (password === null || password === '') {
-      setKV(`env_password:${serverId}`, null)
-    } else {
-      if (typeof password !== 'string' || password.length < 4 || password.length > 128)
-        return res.status(400).json({ error: 'Senha inválida (4-128 chars)' })
-      setKV(`env_password:${serverId}`, hashPwd(password))
-    }
-  }
-
-  res.json({ ok: true })
-})
-
-// ── Env unlock ─────────────────────────────────────────────────────────────────
-app.post('/api/env/unlock', requireAuth, (req, res) => {
-  const { serverId, password } = req.body || {}
-  if (!serverId || typeof password !== 'string')
-    return res.status(400).json({ error: 'Dados inválidos' })
-  if (!getValidServers().includes(serverId))
-    return res.status(400).json({ error: 'Servidor inválido' })
-
-  const envHash    = getKV(`env_password:${serverId}`)
-  const masterHash = getKV('master_password_hash') || hashPwd(HARDCODED_MASTER)
-
-  const ok = (envHash && checkPwd(password, envHash)) || checkPwd(password, masterHash)
-  if (!ok) return res.status(401).json({ error: 'Senha incorreta' })
   res.json({ ok: true })
 })
 
 // ── Admin config ───────────────────────────────────────────────────────────────
 app.get('/api/admin/config', requireAuth, requireAdmin, (_req, res) => {
-  res.json({
-    adminApelidos:     getAdminApelidos(),
-    hasMasterPassword: !!getKV('master_password_hash'),
-  })
-})
-
-app.post('/api/admin/master-password', requireAuth, requireAdmin, (req, res) => {
-  const { password } = req.body || {}
-  if (typeof password !== 'string' || password.length < 6 || password.length > 128)
-    return res.status(400).json({ error: 'Senha inválida (mín. 6 chars)' })
-  setKV('master_password_hash', hashPwd(password))
-  res.json({ ok: true })
+  res.json({ adminApelidos: getAdminApelidos() })
 })
 
 app.get('/api/admin/apelidos', requireAuth, requireAdmin, (_req, res) => {

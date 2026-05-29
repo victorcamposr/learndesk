@@ -13,7 +13,7 @@ import {
   AtSign, Sparkles, Loader2, Eye, EyeOff, History, Copy,
   CalendarCheck, CalendarPlus, Bell, Settings, Bot, Send, Mail,
   Globe, Rocket, ArrowLeftRight, LayoutGrid, List,
-  Lock, LockOpen, Key, Crown, Palette, Swords, Download,
+  Lock, Crown, Palette, Swords, Download,
   Flame, Zap, Star, Gem,
 } from 'lucide-react'
 
@@ -3789,61 +3789,31 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
 }
 
 // ── EnvConfigPanel ────────────────────────────────────────────────────────────
-function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true, meInfo }) {
+function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) {
   const serverId = getServer()
   const srv = (servers || SERVERS).find(s => s.id === serverId) || {}
   const cfg = envConfigs?.[serverId] || {}
 
-  const [name, setName]         = useState('')
-  const [locked, setLocked]     = useState(false)
-  const [password, setPassword] = useState('')
-  const [password2, setPassword2] = useState('')
-  const [showPwd, setShowPwd]   = useState(false)
-  const [saving, setSaving]     = useState(false)
-  const [toast, setToast]       = useState('')
-  const [masterPwd, setMasterPwd]   = useState('')
-  const [masterPwd2, setMasterPwd2] = useState('')
-  const [showMaster, setShowMaster] = useState(false)
-  const [savingMaster, setSavingMaster] = useState(false)
+  const [name, setName]   = useState('')
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast]   = useState('')
 
   useEffect(() => {
     setName(cfg.customName || srv.name || '')
-    setLocked(cfg.locked || false)
-    setPassword('')
-    setPassword2('')
-  }, [serverId, cfg.customName, cfg.locked, srv.name])
-
-  const showToast = msg => setToast(msg)
-
-  const handleSaveMaster = async () => {
-    if (masterPwd.length < 6) { showToast('Mínimo 6 caracteres'); return }
-    if (masterPwd !== masterPwd2) { showToast('As senhas não coincidem'); return }
-    setSavingMaster(true)
-    try {
-      const r = await apiFetch('/api/admin/master-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: masterPwd }) })
-      r.ok ? showToast('Senha mestre atualizada!') : showToast('Erro ao salvar')
-    } catch { showToast('Erro de conexão') }
-    finally { setSavingMaster(false); setMasterPwd(''); setMasterPwd2('') }
-  }
+  }, [serverId, cfg.customName, srv.name])
 
   const handleSave = async () => {
-    if (password && password !== password2) { showToast('As senhas não coincidem'); return }
-    if (locked && !cfg.hasPassword && !password) { showToast('Defina uma senha antes de ativar o bloqueio'); return }
     setSaving(true)
     try {
-      const body = { name }
-      if (locked !== cfg.locked) body.locked = locked
-      if (password) body.password = password
       await apiFetch(`/api/env/config/${serverId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ name }),
       })
       await onUpdateEnv?.()
-      showToast('Salvo com sucesso!')
-      setPassword(''); setPassword2('')
+      setToast('Salvo com sucesso!')
     } catch {
-      showToast('Erro ao salvar')
+      setToast('Erro ao salvar')
     } finally {
       setSaving(false)
     }
@@ -3853,7 +3823,6 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true, me
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {toast && <Toast message={toast} onClose={() => setToast('')} />}
 
-      {/* Nome do ambiente — apenas para admins/full */}
       {canRename && (
       <div>
         <label style={labelStyle}><Globe size={11} /> Nome do Ambiente</label>
@@ -3862,100 +3831,9 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true, me
       </div>
       )}
 
-      {/* Bloqueio */}
-      <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: locked ? 16 : 0 }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.text, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Lock size={13} color={locked ? C.gold : C.textMuted} /> Bloqueio por Senha
-            </div>
-            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 3 }}>
-              {cfg.hasPassword ? 'Senha configurada' : 'Sem senha definida'}
-            </div>
-          </div>
-          <button
-            onClick={() => setLocked(l => !l)}
-            style={{
-              width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
-              background: locked ? C.gold : 'rgba(255,255,255,0.12)',
-              position: 'relative', flexShrink: 0, transition: 'background .2s',
-              boxShadow: locked ? `0 0 10px ${C.gold}60` : 'none',
-            }}
-          >
-            <span style={{
-              position: 'absolute', top: 3, left: locked ? 23 : 3,
-              width: 18, height: 18, borderRadius: '50%', background: '#fff',
-              transition: 'left .2s', boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-            }} />
-          </button>
-        </div>
-
-        {locked && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div>
-              <label style={labelStyle}><Key size={11} /> {cfg.hasPassword ? 'Nova Senha (deixe vazio para manter)' : 'Definir Senha'}</label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showPwd ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  style={{ ...inputBase, paddingRight: 40 }}
-                  placeholder={cfg.hasPassword ? '••••••• (senha já definida)' : 'Mínimo 4 caracteres'}
-                  maxLength={128}
-                />
-                <button type="button" onClick={() => setShowPwd(v => !v)} style={{
-                  position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                  background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted,
-                }}>
-                  {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
-            </div>
-            {password && (
-              <div>
-                <label style={labelStyle}><Key size={11} /> Confirmar Senha</label>
-                <input
-                  type={showPwd ? 'text' : 'password'}
-                  value={password2}
-                  onChange={e => setPassword2(e.target.value)}
-                  style={{ ...inputBase, border: password2 && password !== password2 ? '1px solid #ef444460' : `1px solid ${C.border}` }}
-                  maxLength={128}
-                />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
       <button onClick={handleSave} disabled={saving} style={{ ...btn('gold'), alignSelf: 'flex-end' }}>
         {saving ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Salvando...</> : <><Save size={13} /> Salvar</>}
       </button>
-
-      {/* Senha mestre — apenas admin */}
-      {meInfo?.isAdmin && (
-        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 18, marginTop: 4 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Key size={12} /> Senha Mestre Global
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ position: 'relative' }}>
-              <input type={showMaster ? 'text' : 'password'} value={masterPwd} onChange={e => setMasterPwd(e.target.value)}
-                style={{ ...inputBase, paddingRight: 40 }} placeholder="Nova senha mestre (mín. 6 chars)" maxLength={128} />
-              <button type="button" onClick={() => setShowMaster(v => !v)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted }}>
-                {showMaster ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
-            {masterPwd && (
-              <input type={showMaster ? 'text' : 'password'} value={masterPwd2} onChange={e => setMasterPwd2(e.target.value)}
-                style={{ ...inputBase, border: masterPwd2 && masterPwd !== masterPwd2 ? '1px solid #ef444460' : `1px solid ${C.border}` }}
-                placeholder="Confirmar nova senha mestre" maxLength={128} />
-            )}
-            <button onClick={handleSaveMaster} disabled={!masterPwd || savingMaster} style={{ ...btn('gold', 'sm'), alignSelf: 'flex-start', opacity: !masterPwd ? 0.5 : 1 }}>
-              <Save size={12} /> Salvar Senha Mestre
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -4182,9 +4060,6 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
 function AdminPanel({ meInfo, onUpdateEnv }) {
   const [adminList, setAdminList] = useState([])
   const [newApelido, setNewApelido] = useState('')
-  const [masterPwd, setMasterPwd]   = useState('')
-  const [masterPwd2, setMasterPwd2] = useState('')
-  const [showMaster, setShowMaster] = useState(false)
   const [saving, setSaving]         = useState(false)
   const [toast, setToast]           = useState({ msg: '', ok: true })
 
@@ -4195,21 +4070,6 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
   }, [])
 
   const showToast = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast({ msg: '', ok: true }), 2500) }
-
-  const handleSaveMaster = async () => {
-    if (masterPwd.length < 6) { showToast('Mínimo 6 caracteres', false); return }
-    if (masterPwd !== masterPwd2) { showToast('As senhas não coincidem', false); return }
-    setSaving(true)
-    try {
-      const r = await apiFetch('/api/admin/master-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: masterPwd }),
-      })
-      r.ok ? showToast('Senha mestre atualizada!') : showToast('Erro ao salvar', false)
-    } catch { showToast('Erro de conexão', false) }
-    finally { setSaving(false); setMasterPwd(''); setMasterPwd2('') }
-  }
 
   const handleSaveAdmins = async () => {
     setSaving(true)
@@ -4247,44 +4107,6 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
 
       <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: C.gold, display: 'flex', gap: 8, alignItems: 'center' }}>
         <Crown size={13} /> Logado como <strong>{meInfo?.apelido || '—'}</strong>
-      </div>
-
-      {/* Senha mestre */}
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Key size={12} /> Senha Mestre Global
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ position: 'relative' }}>
-            <input
-              type={showMaster ? 'text' : 'password'}
-              value={masterPwd}
-              onChange={e => setMasterPwd(e.target.value)}
-              style={{ ...inputBase, paddingRight: 40 }}
-              placeholder="Nova senha mestre (mín. 6 chars)"
-              maxLength={128}
-            />
-            <button type="button" onClick={() => setShowMaster(v => !v)} style={{
-              position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-              background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted,
-            }}>
-              {showMaster ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
-          {masterPwd && (
-            <input
-              type={showMaster ? 'text' : 'password'}
-              value={masterPwd2}
-              onChange={e => setMasterPwd2(e.target.value)}
-              style={{ ...inputBase, border: masterPwd2 && masterPwd !== masterPwd2 ? '1px solid #ef444460' : `1px solid ${C.border}` }}
-              placeholder="Confirmar nova senha mestre"
-              maxLength={128}
-            />
-          )}
-          <button onClick={handleSaveMaster} disabled={!masterPwd || saving} style={{ ...btn('gold', 'sm'), alignSelf: 'flex-start', opacity: !masterPwd ? 0.5 : 1 }}>
-            <Save size={12} /> Salvar Senha Mestre
-          </button>
-        </div>
       </div>
 
       {/* Admins */}
@@ -5078,107 +4900,6 @@ function FloatingChat({ tutores, setTutores, apiKey }) {
   )
 }
 
-// ── EnvPasswordScreen ─────────────────────────────────────────────────────────
-function EnvPasswordScreen({ server, onSuccess, onBack }) {
-  const [password, setPassword] = useState('')
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState('')
-  const inputRef = useRef(null)
-
-  useEffect(() => { inputRef.current?.focus() }, [])
-
-  const handle = async e => {
-    e.preventDefault()
-    if (!password) return
-    setLoading(true)
-    setError('')
-    try {
-      const r = await apiFetch('/api/env/unlock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverId: server.id, password }),
-      })
-      if (r.ok) {
-        // sem cache — senha sempre pedida ao trocar de servidor
-        onSuccess()
-      } else {
-        setError('Senha incorreta')
-      }
-    } catch {
-      setError('Erro de conexão')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
-      <BackgroundImage />
-      <BackgroundOrbs />
-      <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 400, padding: '0 16px' }}>
-        <div style={{
-          background: C.card, border: `1px solid ${server.color}40`, borderRadius: 20,
-          padding: '40px 32px', backdropFilter: 'blur(20px)',
-          boxShadow: `0 8px 48px rgba(0,0,0,0.6), 0 0 0 1px ${server.color}20`,
-        }}>
-          <div style={{ textAlign: 'center', marginBottom: 28 }}>
-            <div style={{
-              width: 56, height: 56, borderRadius: 14,
-              background: `${server.color}18`, border: `1px solid ${server.color}45`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px',
-            }}>
-              <Lock size={24} color={server.color} />
-            </div>
-            <div style={{ fontFamily: 'Cinzel, serif', fontWeight: 700, fontSize: 17, color: C.text, marginBottom: 6 }}>
-              {server.name}
-            </div>
-            <div style={{ fontSize: 12, color: C.textMuted }}>
-              Este ambiente está protegido por senha
-            </div>
-          </div>
-
-          <form onSubmit={handle}>
-            <div style={{ marginBottom: 20 }}>
-              <label style={labelStyle}><Key size={11} /> Senha do Ambiente</label>
-              <input
-                ref={inputRef}
-                type="password"
-                value={password}
-                onChange={e => { setPassword(e.target.value); setError('') }}
-                placeholder="Digite a senha..."
-                style={{ ...inputBase, border: `1px solid ${error ? '#ef444460' : C.border}` }}
-                maxLength={128}
-              />
-              {error && (
-                <div style={{ marginTop: 6, fontSize: 12, color: '#f87171', display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <AlertTriangle size={11} /> {error}
-                </div>
-              )}
-            </div>
-
-            <button type="submit" disabled={loading || !password} style={{
-              width: '100%', padding: '11px 0', borderRadius: 9, cursor: loading || !password ? 'not-allowed' : 'pointer',
-              background: loading || !password ? 'rgba(99,102,241,0.3)' : `linear-gradient(135deg, ${server.color}cc, ${server.color})`,
-              border: 'none', color: '#fff', fontSize: 14, fontWeight: 600,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, transition: 'all .15s',
-              marginBottom: 10,
-            }}>
-              {loading ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Verificando...</> : <><LockOpen size={15} /> Entrar</>}
-            </button>
-
-            <button type="button" onClick={onBack} style={{
-              width: '100%', background: 'transparent', border: 'none', cursor: 'pointer',
-              color: C.textMuted, fontSize: 12, padding: '6px 0',
-            }}>
-              ← Voltar à seleção de servidor
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── ServerSelectScreen ────────────────────────────────────────────────────────
 function ServerSelectScreen({ onSelect, servers: serverList, envConfigs, allowedServers }) {
   const fullList = serverList || SERVERS
@@ -5197,7 +4918,6 @@ function ServerSelectScreen({ onSelect, servers: serverList, envConfigs, allowed
         <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 14 }}>
           {list.map(s => {
             const cfg     = envConfigs?.[s.id] || {}
-            const locked  = cfg.locked && cfg.hasPassword
             const label   = cfg.customName || s.name
             const initial = s.roman || label.slice(0, 2).toUpperCase()
             return (
@@ -5218,15 +4938,6 @@ function ServerSelectScreen({ onSelect, servers: serverList, envConfigs, allowed
                   boxShadow: hov === s.id ? `0 10px 28px ${s.color}22` : 'none',
                 }}
               >
-                {locked && (
-                  <div style={{
-                    position: 'absolute', top: 8, right: 8,
-                    background: 'rgba(0,0,0,0.5)', borderRadius: 6, padding: '3px 5px',
-                    display: 'flex', alignItems: 'center',
-                  }}>
-                    <Lock size={11} color={s.color} />
-                  </div>
-                )}
                 <div style={{
                   width: 52, height: 52, borderRadius: 13,
                   background: `${s.color}1a`, border: `1px solid ${s.color}45`,
@@ -5563,7 +5274,6 @@ function AuthGate() {
   const [servers, setServers]           = useState(SERVERS)
   const [envConfigs, setEnvConfigs]     = useState({})
   const [meInfo, setMeInfo]             = useState({ apelido: '', isAdmin: false })
-  const [pendingServer, setPendingServer] = useState(null)
   const [adminSkipMsg, setAdminSkipMsg] = useState('')
   const wasAwaitingRef                  = useRef(false)
 
@@ -5689,12 +5399,6 @@ function AuthGate() {
     if (!meInfo?.isAdmin && allowed?.length === 1) handleSelectServer(allowed[0])
   }, [status, meInfo])
 
-  const handleEnvUnlocked = () => {
-    saveServer(pendingServer)
-    setPendingServer(null)
-    setStatus('ok')
-  }
-
   const handleUpdateEnv = async () => {
     await loadEnvData()
   }
@@ -5709,12 +5413,6 @@ function AuthGate() {
   if (status === 'awaiting') return <DeviceAwaitingScreen onRetry={checkDevice} />
   if (status === 'denied') return <DeviceDeniedScreen />
   if (status === 'login') return <LoginScreen onLogin={handleLogin} justApproved={justApproved} />
-  if (status === 'env-locked') {
-    const sv = servers.find(s => s.id === pendingServer) || { id: pendingServer, name: pendingServer, color: C.primaryLight }
-    const cfg = envConfigs[pendingServer] || {}
-    const displaySv = { ...sv, name: cfg.customName || sv.name }
-    return <EnvPasswordScreen server={displaySv} onSuccess={handleEnvUnlocked} onBack={() => setStatus('server-select')} />
-  }
   if (status === 'server-select') return (
     <ServerSelectScreen
       onSelect={handleSelectServer}
