@@ -3342,6 +3342,7 @@ function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmi
   useEffect(() => { setLocalAllowed(perm.allowedServers || []) }, [JSON.stringify(perm.allowedServers)])
 
   const toggleWorld = id => setLocalAllowed(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  const worldsChanged = JSON.stringify([...(localAllowed)].sort()) !== JSON.stringify([...(perm.allowedServers || [])].sort())
   const saveWorlds = async () => {
     setSavingWorlds(true)
     await onSavePerms(d.token, localAllowed)
@@ -3476,11 +3477,13 @@ function DeviceRow({ d, adminApelidos, permissions, servers, onAct, onToggleAdmi
                   )
                 })}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button onClick={saveWorlds} disabled={savingWorlds} style={{ ...btn('teal', 'sm'), opacity: savingWorlds ? 0.6 : 1 }}>
-                  {savingWorlds ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={11} />} Salvar
-                </button>
-              </div>
+              {worldsChanged && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button onClick={saveWorlds} disabled={savingWorlds} style={{ ...btn('teal', 'sm'), opacity: savingWorlds ? 0.6 : 1 }}>
+                    {savingWorlds ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={11} />} Salvar
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>

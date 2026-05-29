@@ -622,10 +622,11 @@ AÇÕES: add_presenca{nick,data} | remove_presenca{nick,data} | add_presenca_tod
 
 REGRAS (ordem de prioridade):
 1. DEDUP: antes de add_presenca, cheque "TODAS AS PRESENÇAS REGISTRADAS" — se data já existe → acoes:[], informe que já existe. Sem exceções.
-2. DATA FUTURA: não adicione após ${todayStr} sem avisar.
-3. AUSÊNCIA ATIVA: avise se data cai dentro do período de ausência.
-4. NICKS: use exatamente os nicks da lista. Se ambíguo → peça confirmação.
-5. AÇÃO DIRETA: nick+ação claros → execute sem pedir confirmação.
+2. DATA PADRÃO: sem data especificada → use ${todayStr}. Nunca use datas anteriores como padrão.
+3. DATA FUTURA: não adicione após ${todayStr} sem avisar.
+4. AUSÊNCIA ATIVA: avise se data cai dentro do período de ausência.
+5. NICKS: use exatamente os nicks da lista. Se ambíguo → peça confirmação.
+6. AÇÃO DIRETA: nick+ação claros → execute sem pedir confirmação.
 6. CONFIRMAÇÕES ("sim","ok","pode","confirma"): execute exatamente o proposto na última mensagem. Nem mais, nem menos.
 7. add_presenca_todos: SOMENTE se usuário disser explicitamente "todos"/"todo mundo"/"geral".
 8. CONSULTAS: acoes:[] e responda em "resposta". Tutores com 0d NÃO são inativos. Para múltiplos, gere múltiplas acoes.`
