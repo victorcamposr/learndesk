@@ -71,11 +71,11 @@ const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15, atividade
 let _cfg = { ...DEFAULT_CFG }
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
-const TOKEN_KEY     = 'rubinot_token'
+// Token de auth agora é cookie httpOnly — o browser envia automaticamente.
+// localStorage só guarda: servidor selecionado e device token (identificador do dispositivo).
 const SERVER_KEY    = 'rubinot_server'
 const DEVICE_KEY    = 'rubinot_device'
 const DENIED_AT_KEY = 'rubinot_denied_at'
-const getToken       = () => localStorage.getItem(TOKEN_KEY)
 const getServer      = () => localStorage.getItem(SERVER_KEY)
 const saveServer     = s => localStorage.setItem(SERVER_KEY, s)
 const getDeviceToken  = () => localStorage.getItem(DEVICE_KEY) || sessionStorage.getItem(DEVICE_KEY)
@@ -177,14 +177,13 @@ const API  = import.meta.env.VITE_API_URL || ''
 const BASE = import.meta.env.BASE_URL
 
 function apiFetch(url, opts = {}) {
-  const token  = getToken()
   const server = getServer()
   const device = getDeviceToken()
   return fetch(API + url, {
     ...opts,
+    credentials: 'include',
     headers: {
       ...(opts.headers || {}),
-      ...(token  ? { 'x-auth-token':   token  } : {}),
       ...(server ? { 'x-server':       server } : {}),
       ...(device ? { 'x-device-token': device } : {}),
     },
@@ -5202,12 +5201,13 @@ function LoginScreen({ onLogin, justApproved }) {
     try {
       const res = await fetch(API + '/api/auth/login', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, deviceToken: getDeviceToken() }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Erro ao autenticar'); return }
-      localStorage.setItem(TOKEN_KEY, data.token)
+      // Cookie httpOnly setado pelo servidor — sem armazenar token no localStorage
       onLogin()
     } catch {
       setError('Erro de conexão com o servidor')
@@ -5335,13 +5335,10 @@ function AuthGate() {
       const { status: ds } = await r.json()
 
       if (ds === 'approved') {
-        const authToken = getToken()
-        if (!authToken) {
-          if (wasAwaitingRef.current) setJustApproved(true)
-          setStatus('login')
-          return
-        }
-        const vr = await fetch(API + '/api/auth/verify', { headers: { 'x-auth-token': authToken } })
+        const vr = await fetch(API + '/api/auth/verify', {
+          credentials: 'include',
+          headers: { 'x-device-token': deviceToken },
+        })
         if (vr.ok) {
           await loadEnvData()
           const meR = await apiFetch('/api/auth/me')
@@ -5359,6 +5356,7 @@ function AuthGate() {
             setStatus(getServer() ? 'ok' : 'server-select')
           }
         } else {
+          if (wasAwaitingRef.current) setJustApproved(true)
           setStatus('login')
         }
       } else if (ds === 'pending') {
@@ -5372,7 +5370,7 @@ function AuthGate() {
         setStatus('request-access')
       }
     } catch {
-      setStatus(getDeviceToken() ? 'awaiting' : 'request-access')
+      setStatus('conn-error')
     }
   }, [loadEnvData])
 
@@ -5424,6 +5422,18 @@ function AuthGate() {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
       <BackgroundImage />
       <Loader2 size={32} color={C.primaryBright} style={{ position: 'relative', zIndex: 1, animation: 'spin 1s linear infinite' }} />
+    </div>
+  )
+  if (status === 'conn-error') return (
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: C.bg, gap: 16 }}>
+      <BackgroundImage />
+      <div style={{ position: 'relative', zIndex: 1, textAlign: 'center' }}>
+        <div style={{ fontSize: 15, color: C.text, marginBottom: 8 }}>Erro de conexão com o servidor</div>
+        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 20 }}>Verifique se o servidor está online e tente novamente.</div>
+        <button onClick={checkDevice} style={{ background: C.primary, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, cursor: 'pointer' }}>
+          Tentar novamente
+        </button>
+      </div>
     </div>
   )
   if (status === 'request-access') return <DeviceRequestScreen onRequest={handleRequestAccess} />

@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
+import cookieParser from 'cookie-parser'
 import rateLimit from 'express-rate-limit'
 import bcrypt from 'bcryptjs'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
@@ -10,6 +11,9 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import Database from 'better-sqlite3'
 import 'dotenv/config'
+
+// Cookie é Secure+SameSite=None em produção (cross-origin), Lax em dev (localhost)
+const IS_PROD = !!(process.env.ALLOWED_ORIGINS || '').includes('github.io')
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, 'server-data')
@@ -34,11 +38,27 @@ const initAuth = () => {
     process.exit(1)
   }
   const stored = getKV('password_hash')
-  // Re-hash se não existir, for legado (sha256), ou a senha do .env mudou
   const needsUpdate = !stored || !stored.startsWith('$2') || !bcrypt.compareSync(process.env.ADMIN_PASSWORD, stored)
   if (needsUpdate) {
     setKV('password_hash', hashPwd(process.env.ADMIN_PASSWORD))
     console.log('🔑 Hash de senha sincronizado.')
+  }
+
+  // IPs pré-confiáveis definidos no .env (TRUSTED_IPS=ip1,ip2,...)
+  if (process.env.TRUSTED_IPS) {
+    const trusted = getTrustedIPs()
+    let added = 0
+    for (const raw of process.env.TRUSTED_IPS.split(',')) {
+      const ip = raw.trim()
+      if (ip && !trusted[ip]) {
+        trusted[ip] = { approvedAt: new Date().toISOString(), label: 'bootstrap (.env)' }
+        added++
+      }
+    }
+    if (added > 0) {
+      setTrustedIPs(trusted)
+      console.log(`🔐 ${added} IP(s) pré-confiável(is) carregado(s) do .env.`)
+    }
   }
 }
 initAuth()
@@ -104,33 +124,32 @@ const requireServerAccess = (req, res, next) => {
 
 const TOKEN_TTL = 7 * 24 * 60 * 60 * 1000 // 7 dias
 
+const getTrustedIPs = () => getKV('trusted_ips') || {}
+const setTrustedIPs = t => setKV('trusted_ips', t)
+
 function verifyToken(authToken, deviceToken) {
-  if (!authToken) return false
-
-  // Sessões por dispositivo (novo)
-  if (deviceToken) {
-    const sessions = getKV('session_tokens') || {}
-    const s = sessions[deviceToken]
-    if (s?.token && !(s.expires && Date.now() > s.expires) && authToken.length === s.token.length) {
-      try { if (timingSafeEqual(Buffer.from(authToken, 'utf8'), Buffer.from(s.token, 'utf8'))) return true } catch {}
-    }
-  }
-
-  // Sessão global legada (compatibilidade com tokens antigos)
-  const stored = getKV('session_token')
-  const expires = getKV('session_token_expires')
-  if (!stored) return false
-  if (expires && Date.now() > expires) return false
-  if (authToken.length !== stored.length) return false
-  try {
-    return timingSafeEqual(Buffer.from(authToken, 'utf8'), Buffer.from(stored, 'utf8'))
-  } catch { return false }
+  if (!authToken || !deviceToken) return false
+  const sessions = getKV('session_tokens') || {}
+  const s = sessions[deviceToken]
+  if (!s?.token) return false
+  if (s.expires && Date.now() > s.expires) return false
+  if (authToken.length !== s.token.length) return false
+  try { return timingSafeEqual(Buffer.from(authToken, 'utf8'), Buffer.from(s.token, 'utf8')) }
+  catch { return false }
 }
 
+const getAuthToken = req => req.cookies?.rubinot_auth || req.headers['x-auth-token']
+
 const requireAuth = (req, res, next) => {
-  if (!verifyToken(req.headers['x-auth-token'], req.headers['x-device-token']))
+  if (!verifyToken(getAuthToken(req), req.headers['x-device-token']))
     return res.status(401).json({ error: 'Não autorizado' })
   next()
+}
+
+const AUTH_COOKIE_OPTS = {
+  httpOnly: true,
+  secure: IS_PROD,
+  sameSite: IS_PROD ? 'none' : 'lax',
 }
 
 function buildPrompt(tutores, cfg = {}) {
@@ -237,10 +256,11 @@ const saveAnalysesFor = (req, data) => writeFileSync(serverAnalysesFile(req), JS
 const app = express()
 app.set('trust proxy', 1)
 app.use(helmet())
+app.use(cookieParser())
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173', 'https://victorcamposr.github.io']
-app.use(cors({ origin: allowedOrigins }))
+app.use(cors({ origin: allowedOrigins, credentials: true }))
 app.use(express.json({ limit: '1mb' }))
 
 const IS_TEST = process.env.NODE_ENV === 'test'
@@ -293,23 +313,19 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
   const token = randomBytes(32).toString('hex')
   const expires = Date.now() + TOKEN_TTL
 
-  // Sessão por dispositivo
   const sessions = getKV('session_tokens') || {}
-  // Limpa sessões expiradas
   for (const [dt, s] of Object.entries(sessions)) {
     if (s.expires && Date.now() > s.expires) delete sessions[dt]
   }
   sessions[deviceToken] = { token, expires }
   setKV('session_tokens', sessions)
 
-  // Mantém legado para compatibilidade
-  setKV('session_token', token)
-  setKV('session_token_expires', expires)
-  res.json({ token })
+  res.cookie('rubinot_auth', token, { ...AUTH_COOKIE_OPTS, expires: new Date(expires) })
+  res.json({ ok: true })
 })
 
 app.get('/api/auth/verify', (req, res) => {
-  if (!verifyToken(req.headers['x-auth-token']))
+  if (!verifyToken(getAuthToken(req), req.headers['x-device-token']))
     return res.status(401).json({ error: 'Token inválido' })
   res.json({ ok: true })
 })
@@ -321,8 +337,7 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
     delete sessions[deviceToken]
     setKV('session_tokens', sessions)
   }
-  setKV('session_token', null)
-  setKV('session_token_expires', 0)
+  res.clearCookie('rubinot_auth', AUTH_COOKIE_OPTS)
   res.json({ ok: true })
 })
 
@@ -357,9 +372,11 @@ app.post('/api/auth/request-access', requestAccessLimiter, async (req, res) => {
   const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim()
 
   const geo = await geolocateIP(ip)
+  const isTrustedIP = !isFirst && !!getTrustedIPs()[ip]
+  const autoApprove = isFirst || isTrustedIP
 
   devices[deviceToken] = {
-    status:      isFirst ? 'approved' : 'pending',
+    status:      autoApprove ? 'approved' : 'pending',
     requestedAt: new Date().toISOString(),
     apelido:     apelido || '',
     ip,
@@ -385,6 +402,7 @@ app.post('/api/auth/request-access', requestAccessLimiter, async (req, res) => {
   const d = devices[deviceToken]
   const location = geo ? `${geo.city}, ${geo.region}, ${geo.country}` : ip
   if (isFirst) console.log('✅ Primeiro dispositivo (admin) auto-aprovado.')
+  else if (isTrustedIP) console.log(`✅ IP confiável (${ip}) — dispositivo auto-aprovado.`)
   else console.log(`📱 Novo acesso pendente: ${d.browser} · ${d.os} · ${location}`)
 
   res.json({ status: d.status })
@@ -410,6 +428,33 @@ app.post('/api/auth/devices/approve', requireAuth, requireAdmin, (req, res) => {
   devices[token].status = 'approved'
   devices[token].approvedAt = new Date().toISOString()
   setDevices(devices)
+
+  // Registra o IP como confiável para auto-aprovar futuros acessos desse IP
+  const deviceIP = devices[token].ip
+  if (deviceIP && deviceIP !== 'unknown') {
+    const trusted = getTrustedIPs()
+    if (!trusted[deviceIP]) {
+      trusted[deviceIP] = { approvedAt: new Date().toISOString(), label: devices[token].apelido || deviceIP }
+      setTrustedIPs(trusted)
+      console.log(`🔐 IP ${deviceIP} adicionado como confiável.`)
+    }
+  }
+
+  res.json({ ok: true })
+})
+
+app.get('/api/auth/trusted-ips', requireAuth, requireAdmin, (_req, res) => {
+  const trusted = getTrustedIPs()
+  res.json(Object.entries(trusted).map(([ip, d]) => ({ ip, ...d })))
+})
+
+app.post('/api/auth/trusted-ips/revoke', requireAuth, requireAdmin, (req, res) => {
+  const { ip } = req.body || {}
+  if (!ip || typeof ip !== 'string') return res.status(400).json({ error: 'IP inválido' })
+  const trusted = getTrustedIPs()
+  delete trusted[ip]
+  setTrustedIPs(trusted)
+  console.log(`🔓 IP ${ip} removido dos confiáveis.`)
   res.json({ ok: true })
 })
 
