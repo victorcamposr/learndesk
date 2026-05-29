@@ -71,8 +71,7 @@ const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15, atividade
 let _cfg = { ...DEFAULT_CFG }
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
-// Token de auth agora é cookie httpOnly — o browser envia automaticamente.
-// localStorage só guarda: servidor selecionado e device token (identificador do dispositivo).
+// Token de auth é cookie httpOnly — o browser envia automaticamente em credentials: 'include'.
 const SERVER_KEY    = 'rubinot_server'
 const DEVICE_KEY    = 'rubinot_device'
 const DENIED_AT_KEY = 'rubinot_denied_at'
@@ -176,6 +175,8 @@ const ENV_COLORS = [
 const API  = import.meta.env.VITE_API_URL || ''
 const BASE = import.meta.env.BASE_URL
 
+let onUnauthorized = null
+
 function apiFetch(url, opts = {}) {
   const server = getServer()
   const device = getDeviceToken()
@@ -187,6 +188,9 @@ function apiFetch(url, opts = {}) {
       ...(server ? { 'x-server':       server } : {}),
       ...(device ? { 'x-device-token': device } : {}),
     },
+  }).then(r => {
+    if (r.status === 401) onUnauthorized?.()
+    return r
   })
 }
 
@@ -5207,7 +5211,6 @@ function LoginScreen({ onLogin, justApproved }) {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Erro ao autenticar'); return }
-      // Cookie httpOnly setado pelo servidor — sem armazenar token no localStorage
       onLogin()
     } catch {
       setError('Erro de conexão com o servidor')
@@ -5300,6 +5303,12 @@ function AuthGate() {
     return () => clearTimeout(t)
   }, [adminSkipMsg])
 
+  // Qualquer chamada 401 enquanto logado → volta pro login
+  useEffect(() => {
+    onUnauthorized = () => setStatus('login')
+    return () => { onUnauthorized = null }
+  }, [])
+
   const loadEnvData = useCallback(async () => {
     try {
       const [listR, cfgsR, meR] = await Promise.all([
@@ -5335,9 +5344,13 @@ function AuthGate() {
       const { status: ds } = await r.json()
 
       if (ds === 'approved') {
+        const authToken = getToken()
         const vr = await fetch(API + '/api/auth/verify', {
           credentials: 'include',
-          headers: { 'x-device-token': deviceToken },
+          headers: {
+            'x-device-token': deviceToken,
+            ...(authToken ? { 'x-auth-token': authToken } : {}),
+          },
         })
         if (vr.ok) {
           await loadEnvData()
