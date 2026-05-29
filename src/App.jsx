@@ -5830,13 +5830,14 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
       }
       if (apikeyData?.configured) setApiKeyConfigured(true)
     }).catch(() => setTutores([]))
-      .finally(() => setDataLoaded(true))
+      .finally(() => { pendingAuditRef.current = { skip: true }; setDataLoaded(true) })
   }, [])
 
   // Auto-promoção: Em Teste → Tutor após 30 dias (só após carregar)
   useEffect(() => {
     if (!dataLoaded) return
     const hoje = new Date()
+    pendingAuditRef.current = { skip: true }
     setTutores(prev => {
       const updated = prev.map(t => {
         if (t.cargo !== 'Em Teste' || !t.dataInicio) return t
