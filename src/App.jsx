@@ -4936,7 +4936,7 @@ function FloatingChat({ tutores, setTutores, apiKey }) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       const n = execAcoes(data.acoes)
-      setMsgs(prev => [...prev, { role: 'ai', text: data.resposta, acoes: n }])
+      setMsgs(prev => [...prev, { role: 'ai', text: data.resposta, acoes: n, avisos: data._avisos || [] }])
     } catch (e) {
       setMsgs(prev => [...prev, { role: 'ai', text: `Erro: ${e.message}`, error: true }])
     } finally {
@@ -4991,6 +4991,11 @@ function FloatingChat({ tutores, setTutores, apiKey }) {
                       <Check size={10} /> {m.acoes} ação{m.acoes > 1 ? 'ões' : ''} executada{m.acoes > 1 ? 's' : ''}
                     </div>
                   )}
+                  {m.avisos?.length > 0 && m.avisos.map((av, i) => (
+                    <div key={i} style={{ fontSize: 11, color: C.gold, marginTop: 4, display: 'flex', alignItems: 'flex-start', gap: 5 }}>
+                      <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} /> {av}
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}

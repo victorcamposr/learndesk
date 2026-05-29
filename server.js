@@ -461,12 +461,14 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   const todayStr = fmt(today)
   const ontemStr = fmt(new Date(today - 86400000))
 
+  const diaSemana = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'][today.getDay()]
   const todosNicks = (tutores || []).map(t => `${t.nick} (${t.cargo})`).join(', ')
   const resumo = (tutores || []).map(t => {
     const mesAtual = todayStr.slice(0, 7)
-    const presencasMesLista = (t.presencas || []).filter(d => d.startsWith(mesAtual)).sort()
+    const todasPresencas = (t.presencas || []).slice().sort()
+    const presencasMesLista = todasPresencas.filter(d => d.startsWith(mesAtual))
     const presencasMes = presencasMesLista.length
-    const ultimaPresenca = [...(t.presencas || [])].sort().at(-1) || null
+    const ultimaPresenca = todasPresencas.at(-1) || null
     const ausenciaAtiva = (t.ausencias || []).find(a => a.dataFim >= todayStr)
     const refDate = ultimaPresenca || t.dataInicio || todayStr
     const diasSem = Math.floor((new Date(todayStr) - new Date(refDate)) / 86400000)
@@ -475,8 +477,11 @@ app.post('/api/chat', requireAuth, async (req, res) => {
       : t.dataInicio >= todayStr
         ? `entrou hoje — sem presenças ainda (0d)`
         : `sem presenças — entrou em ${t.dataInicio} (${diasSem}d desde entrada)`
-    const datasPresenca = presencasMesLista.length ? ` | datas este mês: [${presencasMesLista.join(', ')}]` : ''
-    return `- ${t.nick} | cargo: ${t.cargo} | na equipe desde: ${t.dataInicio || '?'} | presenças este mês: ${presencasMes}${datasPresenca} | ${semInfo}${ausenciaAtiva ? ` | AUSENTE até ${ausenciaAtiva.dataFim}` : ''}${t.obs ? ` | obs: ${t.obs}` : ''}`
+    const datasPresenca = presencasMesLista.length ? ` | presenças este mês: [${presencasMesLista.join(', ')}]` : ''
+    const todasDatas = todasPresencas.length
+      ? ` | TODAS AS PRESENÇAS REGISTRADAS (use para dedup): [${todasPresencas.join(', ')}]`
+      : ' | nenhuma presença registrada'
+    return `- ${t.nick} | cargo: ${t.cargo} | na equipe desde: ${t.dataInicio || '?'} | presenças este mês: ${presencasMes}${datasPresenca}${todasDatas} | ${semInfo}${ausenciaAtiva ? ` | AUSENTE até ${ausenciaAtiva.dataFim}` : ''}${t.obs ? ` | obs: ${t.obs}` : ''}`
   }).join('\n')
 
   const historicoFmt = (history || []).slice(-8).map(m =>
@@ -484,42 +489,58 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   ).join('\n')
 
   const prompt = `Você é um assistente de gestão da equipe de tutores do servidor Rubinot.
-Data de hoje: ${todayStr} | Ontem: ${ontemStr}
+Hoje: ${todayStr} (${diaSemana}) | Ontem: ${ontemStr}
 
 TUTORES:
 ${resumo}
 
-TODOS OS NICKS DISPONÍVEIS: ${todosNicks}
+TODOS OS NICKS: ${todosNicks}
 
-${historicoFmt ? `HISTÓRICO RECENTE DA CONVERSA:\n${historicoFmt}\n` : ''}
-MENSAGEM ATUAL DO USUÁRIO: "${message}"
+${historicoFmt ? `HISTÓRICO RECENTE:\n${historicoFmt}\n` : ''}
+MENSAGEM DO USUÁRIO: "${message}"
 
 Responda SOMENTE com JSON puro (sem markdown, sem blocos de código):
-{
-  "resposta": "mensagem curta e amigável para o usuário",
-  "acoes": []
-}
+{ "resposta": "mensagem curta para o usuário", "acoes": [] }
 
-TIPOS DE AÇÃO DISPONÍVEIS (use no array "acoes"):
+AÇÕES DISPONÍVEIS:
 { "tipo": "add_presenca", "nick": "...", "data": "YYYY-MM-DD" }
 { "tipo": "remove_presenca", "nick": "...", "data": "YYYY-MM-DD" }
 { "tipo": "add_presenca_todos", "data": "YYYY-MM-DD", "exceto": ["nick1"] }
 { "tipo": "add_ausencia", "nick": "...", "dataInicio": "YYYY-MM-DD", "dataFim": "YYYY-MM-DD", "motivo": "..." }
 { "tipo": "remove_ausencia", "nick": "..." }
 { "tipo": "change_cargo", "nick": "...", "cargo": "Tutor|Em Teste|Sênior|Inativo|Desligado" }
-{ "tipo": "add_obs", "nick": "...", "obs": "texto da observação" }
+{ "tipo": "add_obs", "nick": "...", "obs": "..." }
 
-REGRAS CRÍTICAS — LEIA COM ATENÇÃO:
-- Use EXATAMENTE os nicks da lista. Nunca invente nicks.
-- "s", "sim", "yes", "ok", "pode", "confirma" e variantes SÓ significam confirmação da ÚLTIMA ação proposta pelo assistente no histórico. Use o histórico para saber exatamente o que foi proposto e execute APENAS aquilo — nem mais, nem menos.
-- "add_presenca_todos" APENAS quando o usuário disser EXPLICITAMENTE "todos", "todo mundo", "all", "geral" etc. Nunca use para confirmar ação individual.
-- Para consultas/perguntas, deixe "acoes": [] e responda na "resposta".
-- Para múltiplos tutores, gere múltiplas entradas no array. "acoes" pode misturar tipos.
-- Para "quem não aparece há X dias": tutores com 0d NÃO são inativos. Tutores que entraram hoje têm 0 dias.
-- Se o nick bate exatamente com alguém da lista e a ação é clara: EXECUTE diretamente, sem pedir confirmação.
-- Só peça confirmação quando houver ambiguidade REAL: nick parecido mas não exato, data incerta, ou ação genuinamente dúbia.
-- Se o tutor JÁ TEM a data solicitada na lista "datas este mês", NÃO execute add_presenca — deixe "acoes": [] e informe o usuário que a presença já está registrada para aquela data.
-- NUNCA execute ações em massa a partir de uma confirmação que se referia a ação individual.`
+══════════════ REGRAS — SIGA NESTA ORDEM ══════════════
+
+🚫 REGRA 1 — DEDUP (MAIS IMPORTANTE):
+Antes de gerar QUALQUER add_presenca, verifique "TODAS AS PRESENÇAS REGISTRADAS" do tutor na lista acima.
+Se a data já está nessa lista → NÃO gere a ação. Informe que já existe. Sem exceções.
+Exemplo: tutor tem [2025-01-10, 2025-01-15] e usuário pede add para 2025-01-10 → acoes:[], responda "já tem presença nessa data".
+
+🚫 REGRA 2 — DATA FUTURA:
+Não adicione presença para datas após ${todayStr} sem avisar explicitamente o usuário.
+
+⚠️ REGRA 3 — AUSÊNCIA ATIVA:
+Se o tutor está AUSENTE e a data cai dentro do período de ausência, avise o usuário antes de executar.
+
+✅ REGRA 4 — NICKS:
+Use EXATAMENTE os nicks da lista. Nunca invente. Se não há match exato → peça confirmação.
+
+✅ REGRA 5 — AÇÃO DIRETA:
+Nick exato + ação clara → execute sem confirmação. Só peça confirmação em ambiguidade real (nick parecido, data incerta).
+
+✅ REGRA 6 — CONFIRMAÇÕES:
+"s", "sim", "ok", "pode", "confirma" e similares = execute EXATAMENTE o que foi proposto na última mensagem do assistente. Nem mais, nem menos.
+
+🚫 REGRA 7 — add_presenca_todos:
+SOMENTE quando o usuário disser EXPLICITAMENTE "todos", "todo mundo", "geral". NUNCA em resposta a confirmação individual.
+
+📊 REGRA 8 — CONSULTAS:
+Para perguntas/análises, acoes:[] e responda em "resposta".
+
+Para "quem não aparece há X dias": tutores com 0d NÃO são inativos. Tutores que entraram hoje têm 0 dias.
+Para múltiplos tutores, gere múltiplas entradas em "acoes".`
 
   try {
     const genAI = new GoogleGenerativeAI(key)
@@ -529,21 +550,28 @@ REGRAS CRÍTICAS — LEIA COM ATENÇÃO:
     if (text.startsWith('```')) text = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
     const parsed = JSON.parse(text)
 
-    // Server-side dedup guard: remove add_presenca if date already exists
+    // Server-side dedup: remove add_presenca se data já existe
     if (Array.isArray(parsed.acoes)) {
       const tutorMap = {}
       for (const t of tutores) tutorMap[t.nick?.toLowerCase()] = t
+      const removidas = []
       parsed.acoes = parsed.acoes.filter(a => {
         if (a.tipo !== 'add_presenca') return true
         const t = tutorMap[a.nick?.toLowerCase()]
         if (!t) return true
         const already = (t.presencas || []).includes(a.data)
-        if (already) {
-          if (!parsed._avisos) parsed._avisos = []
-          parsed._avisos.push(`${a.nick} já tem presença em ${a.data}`)
-        }
+        if (already) removidas.push(a)
         return !already
       })
+      if (removidas.length > 0) {
+        const nomes = removidas.map(a => `${a.nick} em ${a.data}`).join(', ')
+        parsed._avisos = [...(parsed._avisos || []), `Presença já registrada (ignorada): ${nomes}`]
+        if (parsed.acoes.length === 0) {
+          parsed.resposta = `Já ${removidas.length > 1 ? 'existem presenças registradas' : 'existe presença registrada'} para: ${nomes}. Nenhuma alteração feita.`
+        } else {
+          parsed.resposta += ` (ignorado — já existia: ${nomes})`
+        }
+      }
     }
 
     res.json(parsed)
