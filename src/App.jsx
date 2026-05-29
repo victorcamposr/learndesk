@@ -2386,7 +2386,7 @@ function IAModal({ open, onClose, tutores, apiKeyConfigured, onSaveApiKey }) {
 }
 
 // ── PagamentoEmailModal ───────────────────────────────────────────────────────
-function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
+function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meInfo }) {
   const hoje = new Date()
   const mesAtual = hoje.getMonth()
   const anoAtual = hoje.getFullYear()
@@ -2461,13 +2461,14 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
     const nomeWorld = mundo.trim() || '[Nome do Mundo]'
     const assunto = `${nomeWorld} - NITRO e Pagamento (${dataPag})`
 
+    const assinante = meInfo?.apelido || 'Equipe'
     const linhas = membros.map((m, i) => {
       const obs = m.obsEmail.trim()
       return [
         `${i + 1}. ${m.nick}${m.cargo ? ` — ${m.cargo}` : ''}`,
         `   Nitro Discord Oficial: ${m.nitroOficial ? '✅ Sim' : '❌ Não'}`,
         `   Nitro Discord Staff: ${m.nitroStaff ? '✅ Sim' : '❌ Não'}`,
-        obs ? `   Obs: ${obs}` : null,
+        obs ? `   **Obs: ${obs}**` : null,
       ].filter(Boolean).join('\n')
     }).join('\n\n')
 
@@ -2483,7 +2484,7 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
       `${'━'.repeat(50)}`,
       ``,
       `Atenciosamente,`,
-      `Campin — ${nomeWorld}`,
+      `${assinante} — ${nomeWorld}`,
     ].join('\n')
 
     setEmailGerado({ assunto, corpo })
@@ -2710,7 +2711,16 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
               fontFamily: "'Space Grotesk', monospace", whiteSpace: 'pre-wrap',
               lineHeight: 1.75, maxHeight: 420, overflowY: 'auto', margin: 0,
             }}>
-              {emailGerado.corpo}
+              {emailGerado.corpo.split('\n').map((line, i) => {
+                const bold = line.match(/^\*\*(.+)\*\*$/)
+                if (bold) return <span key={i}><strong style={{ color: C.gold }}>{bold[1]}</strong>{'\n'}</span>
+                const inlineBold = line.replace(/\*\*(.+?)\*\*/g, '|||$1|||')
+                if (inlineBold.includes('|||')) {
+                  const parts = inlineBold.split('|||')
+                  return <span key={i}>{parts.map((p, j) => j % 2 === 1 ? <strong key={j} style={{ color: C.gold }}>{p}</strong> : p)}{'\n'}</span>
+                }
+                return <span key={i}>{line}{'\n'}</span>
+              })}
             </pre>
           </div>
 
@@ -3017,7 +3027,7 @@ function PresencaHistoricoChart({ tutores }) {
 }
 
 // ── DashboardTab ──────────────────────────────────────────────────────────────
-function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envConfigs, cfg }) {
+function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envConfigs, cfg, meInfo }) {
   const [sortAsc, setSortAsc] = useState(false)
   const [pagamentoOpen, setPagamentoOpen] = useState(false)
 
@@ -3094,7 +3104,7 @@ function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envCon
   return (
     <div style={{ maxWidth: 1220, margin: '0 auto', padding: '28px 24px' }}>
 
-      <PagamentoEmailModal open={pagamentoOpen} onClose={() => setPagamentoOpen(false)} tutores={tutores} servers={servers} envConfigs={envConfigs} />
+      <PagamentoEmailModal open={pagamentoOpen} onClose={() => setPagamentoOpen(false)} tutores={tutores} servers={servers} envConfigs={envConfigs} meInfo={meInfo} />
 
       {/* Ação rápida — Email de Pagamento */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
@@ -5895,7 +5905,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
           ) : (
             <>
               {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} cfg={cfg} pendingAuditRef={pendingAuditRef} />}
-              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKeyConfigured={apiKeyConfigured} onSaveApiKey={handleSaveApiKey} servers={serversProp} envConfigs={envConfigs} cfg={cfg} />}
+              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKeyConfigured={apiKeyConfigured} onSaveApiKey={handleSaveApiKey} servers={serversProp} envConfigs={envConfigs} cfg={cfg} meInfo={meInfo} />}
             </>
           )}
         </main>
