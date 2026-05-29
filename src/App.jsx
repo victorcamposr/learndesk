@@ -3010,37 +3010,19 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
     ATIVIDADES.map(a => ({ name: a, total: tutores.filter(t => getAtividade(t) === a).length }))
   , [tutores])
 
-  const PERIODO_COMBOS = ['Manhã', 'Tarde', 'Noite', 'Manhã/Tarde', 'Manhã/Noite', 'Tarde/Noite', 'Manhã/Tarde/Noite', 'Outro']
+  const PERIODO_SLOT_COLORS = {
+    'Manhã · Sem':  '#818cf8', 'Tarde · Sem':  '#6366f1', 'Noite · Sem':  '#4f46e5',
+    'Manhã · FDS':  '#fbbf24', 'Tarde · FDS':  '#f59e0b', 'Noite · FDS':  '#d97706',
+  }
+  const PERIODO_SLOT_KEYS = ['Manhã · Sem', 'Tarde · Sem', 'Noite · Sem', 'Manhã · FDS', 'Tarde · FDS', 'Noite · FDS']
   const periodoData = useMemo(() => {
-    const map = {}
-    PERIODO_COMBOS.forEach(k => { map[k] = 0 })
+    const map = Object.fromEntries(PERIODO_SLOT_KEYS.map(k => [k, 0]))
     tutores.forEach(t => {
       const { semana, fds } = parseHorarios(t.horarios)
-      // Conta pelo conjunto de períodos únicos (união semana+fds)
-      const union = [...new Set([...semana, ...fds])]
-      const h = PERIODOS.filter(p => union.includes(p)).join('/')
-      if (PERIODO_COMBOS.includes(h)) map[h]++
-      else if (h) map['Outro']++
+      semana.forEach(p => { if (map[`${p} · Sem`] !== undefined) map[`${p} · Sem`]++ })
+      fds.forEach(p =>   { if (map[`${p} · FDS`] !== undefined) map[`${p} · FDS`]++ })
     })
-    return PERIODO_COMBOS.map(name => ({ name, total: map[name] })).filter(d => d.total > 0)
-  }, [tutores])
-
-  const diasData = useMemo(() => {
-    const map = { Semana: 0, FDS: 0, Ambos: 0 }
-    tutores.forEach(t => {
-      if (!t.horarios || t.horarios === '?') return
-      const { semana, fds } = parseHorarios(t.horarios)
-      const hasSem = semana.length > 0
-      const hasFDS = fds.length > 0
-      if (hasSem && hasFDS) map['Ambos']++
-      else if (hasSem) map['Semana']++
-      else if (hasFDS) map['FDS']++
-    })
-    return [
-      { name: 'Dias de semana', total: map['Semana'], color: '#6366f1' },
-      { name: 'Final de semana', total: map['FDS'], color: '#f59e0b' },
-      { name: 'Ambos', total: map['Ambos'], color: '#2dd4bf' },
-    ].filter(d => d.total > 0)
+    return PERIODO_SLOT_KEYS.map(name => ({ name, total: map[name], color: PERIODO_SLOT_COLORS[name] })).filter(d => d.total > 0)
   }, [tutores])
 
   const entradaMesData = useMemo(() => {
@@ -3198,33 +3180,16 @@ function DashboardTab({ tutores, apiKey, onSaveApiKey, servers, envConfigs }) {
             title: 'Tutores por Período', Icon: Clock,
             content: (
               <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={periodoData} layout="vertical" margin={{ top: 5, right: 20, left: 90, bottom: 5 }}>
+                <BarChart data={periodoData} layout="vertical" margin={{ top: 5, right: 20, left: 100, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false} />
                   <XAxis type="number" tick={{ fill: C.textSoft, fontSize: 11 }} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" tick={{ fill: C.textSoft, fontSize: 11 }} width={90} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: C.textSoft, fontSize: 11 }} width={100} />
                   <Tooltip content={<RechartTooltip />} />
                   <Bar dataKey="total" name="Tutores" radius={[0, 5, 5, 0]}>
-                    {periodoData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    {periodoData.map((d, i) => <Cell key={i} fill={d.color} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            ),
-          },
-          {
-            title: 'Cobertura por Dia', Icon: Clock,
-            hidden: diasData.length === 0,
-            content: (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8 }}>
-                {diasData.map(d => (
-                  <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 12, color: C.textSoft, width: 140, flexShrink: 0 }}>{d.name}</span>
-                    <div style={{ flex: 1, height: 20, background: 'rgba(255,255,255,0.04)', borderRadius: 6, overflow: 'hidden' }}>
-                      <div style={{ width: `${Math.round((d.total / tutores.length) * 100)}%`, height: '100%', background: d.color, borderRadius: 6, transition: 'width .4s' }} />
-                    </div>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: d.color, width: 28, textAlign: 'right' }}>{d.total}</span>
-                  </div>
-                ))}
-              </div>
             ),
           },
           {
