@@ -2451,6 +2451,9 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meIn
   const anoAtual = hoje.getFullYear()
 
   const aptos = useMemo(() => tutores.filter(t => {
+    // Usa campo pré-computado pelo servidor quando disponível
+    if (t.apto != null) return t.apto
+    // Fallback: cálculo local (tutores recém-modificados que ainda não sincronizaram)
     if (t.cargo === 'Inativo' || t.cargo === 'Desligado') return false
     if (!t.dataInicio) return false
     const inicio = new Date(t.dataInicio + 'T00:00:00')
@@ -6007,22 +6010,6 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     }).catch(() => setTutores([]))
       .finally(() => { pendingAuditRef.current = { skip: true }; setDataLoaded(true) })
   }, [])
-
-  // Auto-promoção: Em Teste → Tutor após 30 dias (só após carregar)
-  useEffect(() => {
-    if (!dataLoaded) return
-    const hoje = new Date()
-    pendingAuditRef.current = { skip: true }
-    setTutores(prev => {
-      const updated = prev.map(t => {
-        if (t.cargo !== 'Em Teste' || !t.dataInicio) return t
-        const dias = Math.floor((hoje - new Date(t.dataInicio)) / 86400000)
-        if (dias >= 30) return { ...t, cargo: 'Tutor', dataEfetivacao: t.dataEfetivacao || todayStr() }
-        return t
-      })
-      return updated.some((t, i) => t !== prev[i]) ? updated : prev
-    })
-  }, [dataLoaded])
 
   // Salva no servidor a cada mudança (debounced 600ms)
   const saveTimer       = useRef(null)
