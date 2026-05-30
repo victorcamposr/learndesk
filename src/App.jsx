@@ -1405,12 +1405,31 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
 
       {/* Badges */}
       <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexShrink: 0 }}>
+        {tutor.cargo === 'Em Teste' && !tutor.dataEfetivacao && tutor.dataInicio ? (() => {
+          const dias = diasParaEfetivacao(tutor.dataInicio)
+          return (
+            <HoverTooltip side="top" width={170} content={
+              <span style={{ fontSize: 12, color: C.text, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Clock size={11} color="#93c5fd" />
+                {dias === 0 ? 'Efetivação hoje!' : `${dias}d para efetivação`}
+              </span>
+            }>
+              <span style={{
+                background: `${CARGO_COLORS['Em Teste']}16`,
+                border: `1px solid ${CARGO_COLORS['Em Teste']}40`,
+                borderRadius: 5, color: CARGO_COLORS['Em Teste'],
+                fontSize: 10, fontWeight: 700, padding: '2px 7px', cursor: 'default',
+              }}>Em Teste</span>
+            </HoverTooltip>
+          )
+        })() : (
         <span style={{
           background: `${CARGO_COLORS[tutor.cargo] || C.textMuted}16`,
           border: `1px solid ${CARGO_COLORS[tutor.cargo] || C.textMuted}40`,
           borderRadius: 5, color: CARGO_COLORS[tutor.cargo] || C.textMuted,
           fontSize: 10, fontWeight: 700, padding: '2px 7px',
         }}>{tutor.cargo}</span>
+        )}
 
         {!isDesligado && (
           <span style={{
@@ -2486,8 +2505,9 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meIn
     const linhas = membros.map((m, i) => {
       const obs = m.obsEmail.trim()
       const impulsos = [m.nitroOficial && 'Oficial', m.nitroStaff && 'Staff'].filter(Boolean)
+      const cargoExibido = m.cargo === 'Em Teste' ? 'Tutor' : m.cargo
       return [
-        `${i + 1}. ${m.nick}${m.cargo ? ` — ${m.cargo}` : ''}`,
+        `${i + 1}. ${m.nick}${cargoExibido ? ` — ${cargoExibido}` : ''}`,
         impulsos.length ? `   Impulsos: ${impulsos.join(' / ')}` : `   (sem impulsos)`,
         obs ? `   **Obs: ${obs}**` : null,
       ].filter(Boolean).join('\n')
