@@ -703,7 +703,9 @@ REGRAS (ordem de prioridade):
 
       // Aplica acoes diretamente no banco (evita depender do save client-side)
       const ATIVOS = ['Tutor', 'Em Teste', 'Sênior']
-      const stored = getKV(serverKey(req, 'tutores')) || []
+      const storedKey = serverKey(req, 'tutores')
+      const stored = getKV(storedKey) || []
+      console.log(`[IA-APPLY] key=${storedKey} acoes=${JSON.stringify(parsed.acoes.map(a=>({tipo:a.tipo,nick:a.nick,data:a.data})))} stored_nicks=${stored.map(t=>t.nick).join('|')}`)
       let updatedStored = [...stored]
       for (const a of parsed.acoes) {
         if (a.tipo === 'add_presenca_todos') {
@@ -716,6 +718,7 @@ REGRAS (ordem de prioridade):
         } else {
           updatedStored = updatedStored.map(t => {
             if (t.nick?.toLowerCase() !== a.nick?.toLowerCase()) return t
+            console.log(`[IA-APPLY] match nick="${t.nick}" tipo=${a.tipo} data=${a.data}`)
             if (a.tipo === 'add_presenca')
               return { ...t, presencas: [...new Set([...(t.presencas || []), a.data])] }
             if (a.tipo === 'remove_presenca')
@@ -738,7 +741,9 @@ REGRAS (ordem de prioridade):
           })
         }
       }
-      setKV(serverKey(req, 'tutores'), updatedStored)
+      setKV(storedKey, updatedStored)
+      const afterNeo = updatedStored.find(t => t.nick?.toLowerCase().includes('neo'))
+      console.log(`[IA-APPLY] saved. neo_presencas=${JSON.stringify(afterNeo?.presencas)}`)
       parsed._tutores = updatedStored
     }
 
