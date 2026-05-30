@@ -4541,6 +4541,7 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
 function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDeleteAusenciaHistorico }) {
   const [copied, setCopied] = useState(false)
   const [showHistorico, setShowHistorico] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(null) // { type: 'obs'|'ausencia', id }
 
   const handleCopy = () => {
     const texto = `ADICIONAR CARGOS/ REMOVER CARGOS\n\nDiscord: ${tutor.discord || ''}\nIn-game: ${tutor.nick}`
@@ -4598,7 +4599,7 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
     return { days, count: marked.size, totalDays }
   }, [tutor, currentMonthKey])
 
-  useEffect(() => { if (!open) setShowHistorico(false) }, [open])
+  useEffect(() => { if (!open) { setShowHistorico(false); setConfirmDelete(null) } }, [open])
 
   if (!tutor) return null
 
@@ -4799,14 +4800,23 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {[...(tutor.obsHistorico || [])].reverse().map(h => (
                         <div key={h.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                          <StickyNote size={11} color={C.textMuted} style={{ flexShrink: 0, marginTop: 2 }} />
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: 12, color: C.textSoft, lineHeight: 1.5 }}>{h.texto}</div>
                             <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>{formatDate(h.data)}</div>
                           </div>
                           {onDeleteObsHistorico && (
-                            <button onClick={() => onDeleteObsHistorico(tutor.id, h.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
-                              <Trash2 size={13} />
-                            </button>
+                            confirmDelete?.type === 'obs' && confirmDelete?.id === h.id ? (
+                              <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexShrink: 0 }}>
+                                <span style={{ fontSize: 11, color: '#f87171' }}>Apagar?</span>
+                                <button style={{ ...btn('danger', 'sm'), padding: '3px 10px' }} onClick={() => { onDeleteObsHistorico(tutor.id, h.id); setConfirmDelete(null) }}>Sim</button>
+                                <button style={{ ...btn('ghost', 'sm'), padding: '3px 8px' }} onClick={() => setConfirmDelete(null)}>Não</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => setConfirmDelete({ type: 'obs', id: h.id })} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
+                                <Trash2 size={13} />
+                              </button>
+                            )
                           )}
                         </div>
                       ))}
@@ -4825,9 +4835,17 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
                             <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{formatDate(a.dataInicio)} → {formatDate(a.dataFim)}</div>
                           </div>
                           {onDeleteAusenciaHistorico && (
-                            <button onClick={() => onDeleteAusenciaHistorico(tutor.id, a.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
-                              <Trash2 size={13} />
-                            </button>
+                            confirmDelete?.type === 'ausencia' && confirmDelete?.id === a.id ? (
+                              <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexShrink: 0 }}>
+                                <span style={{ fontSize: 11, color: '#f87171' }}>Apagar?</span>
+                                <button style={{ ...btn('danger', 'sm'), padding: '3px 10px' }} onClick={() => { onDeleteAusenciaHistorico(tutor.id, a.id); setConfirmDelete(null) }}>Sim</button>
+                                <button style={{ ...btn('ghost', 'sm'), padding: '3px 8px' }} onClick={() => setConfirmDelete(null)}>Não</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => setConfirmDelete({ type: 'ausencia', id: a.id })} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
+                                <Trash2 size={13} />
+                              </button>
+                            )
                           )}
                         </div>
                       ))}
