@@ -2085,7 +2085,7 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
       <div style={{ display: 'grid', gridTemplateColumns: _cfg.atividadeAutomatica ? 'repeat(5, 1fr) 1.4fr' : 'repeat(4, 1fr) 1.4fr', gap: 12, marginBottom: 24 }}>
         <StatPill icon={Users}         label="Total"           value={stats.total}         color={C.gold} />
         <StatPill icon={UserCheck}     label="Ativos"          value={stats.ativos}        color="#10b981" sub="Tutor + Em Teste" />
-        {_cfg.atividadeAutomatica && <StatPill icon={CalendarCheck} label="Presenças Hoje"  value={stats.presencasHoje} color={C.teal} sub={_cfg.presencaApenasEmTeste ? `de ${stats.emTeste} em teste${stats.naoAptos > 0 ? ` · ${stats.naoAptos} sem contagem` : ''}` : `de ${stats.ativos} ativos`} />}
+        {_cfg.atividadeAutomatica && <StatPill icon={CalendarCheck} label="Presenças Hoje"  value={stats.presencasHoje} color={C.teal} sub={_cfg.presencaApenasEmTeste ? `de ${stats.emTeste} em teste` : `de ${stats.ativos} ativos`} />}
         <StatPill icon={Palmtree}      label="Em Ausência"     value={stats.ausentes}      color="#8b5cf6" />
         <StatPill icon={AlertTriangle} label="Atenção"         value={stats.alertas}       color="#f97316" sub="baixa atividade" />
         <AtividadeBar tutores={tutores} />
@@ -3078,11 +3078,13 @@ function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envCon
 
   const presencaHoje = useMemo(() => {
     const hoje = todayStr()
+    const base = _cfg.presencaApenasEmTeste ? ativos.filter(t => t.cargo === 'Em Teste') : ativos
     return {
-      presentes:    ativos.filter(t => (t.presencas || []).includes(hoje)),
-      semPresenca:  ativos.filter(t => !(t.presencas || []).includes(hoje)),
+      presentes:   base.filter(t => (t.presencas || []).includes(hoje)),
+      semPresenca: base.filter(t => !(t.presencas || []).includes(hoje)),
+      total: base.length,
     }
-  }, [ativos])
+  }, [ativos, cfg])
 
   const mediaMeses = useMemo(() => {
     if (!ativos.length) return null
@@ -3174,7 +3176,7 @@ function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envCon
           </h3>
           <span style={{ fontSize: 12, color: C.textSoft }}>
             <span style={{ ...gText(C.teal), fontWeight: 700, fontSize: 15 }}>{presencaHoje.presentes.length}</span>
-            <span style={{ color: C.textMuted }}> / {ativos.length} ativos</span>
+            <span style={{ color: C.textMuted }}> / {presencaHoje.total} {_cfg.presencaApenasEmTeste ? 'em teste' : 'ativos'}</span>
           </span>
         </div>
 
@@ -3182,7 +3184,7 @@ function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envCon
         <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', marginBottom: 16, overflow: 'hidden' }}>
           <div style={{
             height: '100%',
-            width: `${ativos.length ? (presencaHoje.presentes.length / ativos.length) * 100 : 0}%`,
+            width: `${presencaHoje.total ? (presencaHoje.presentes.length / presencaHoje.total) * 100 : 0}%`,
             background: `linear-gradient(90deg, #0d9488, ${C.teal})`,
             borderRadius: 4, transition: 'width .4s',
             boxShadow: `0 0 8px ${C.teal}60`,
@@ -4476,12 +4478,26 @@ function TutorProfileModal({ tutor, open, onClose }) {
     })
   }, [])
 
-  const chartData = useMemo(() =>
-    meses.map(m => ({
-      name: m.label,
-      presencas: (tutor?.presencas || []).filter(d => d.startsWith(m.key)).length,
-    }))
-  , [meses, tutor])
+  const usaPresenca = !(_cfg.presencaApenasEmTeste && tutor?.cargo !== 'Em Teste')
+
+  const ATIV_NUM = { 'Alta': 4, 'Moderada': 3, 'Baixa': 2, 'Não Definida': 1 }
+
+  const chartData = useMemo(() => {
+    if (usaPresenca) {
+      return meses.map(m => ({
+        name: m.label,
+        presencas: (tutor?.presencas || []).filter(d => d.startsWith(m.key)).length,
+      }))
+    }
+    return meses.map(m => {
+      const historico = tutor?.atividadeHistorico || []
+      const entrada = historico.find(h => h.mes === m.key)
+      const atv = m.key === currentMonthKey
+        ? (tutor?.atividade || 'Não Definida')
+        : (entrada?.atividade || null)
+      return { name: m.label, valor: atv ? (ATIV_NUM[atv] || 0) : 0, atividade: atv || 'Sem dados' }
+    })
+  }, [meses, tutor, usaPresenca])
 
   const currentMonthInfo = useMemo(() => {
     if (!tutor) return null
@@ -4576,8 +4592,8 @@ function TutorProfileModal({ tutor, open, onClose }) {
           {tutor.detalheHorario && infoRow(Clock, 'Detalhe', tutor.detalheHorario)}
         </div>
 
-        {/* Mês atual */}
-        {currentMonthInfo && (
+        {/* Mês atual — só para quem usa presença */}
+        {usaPresenca && currentMonthInfo && (
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
               <CalendarCheck size={12} />
@@ -4627,24 +4643,36 @@ function TutorProfileModal({ tutor, open, onClose }) {
         {/* Histórico 6 meses */}
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10 }}>
-            Histórico — últimos 6 meses
+            {usaPresenca ? 'Histórico — últimos 6 meses' : 'Atividade — últimos 6 meses'}
           </div>
           <ResponsiveContainer width="100%" height={150}>
             <BarChart data={chartData} margin={{ top: 4, right: 8, left: -24, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="name" tick={{ fill: C.textSoft, fontSize: 10 }} />
-              <YAxis tick={{ fill: C.textSoft, fontSize: 10 }} allowDecimals={false} />
+              {usaPresenca
+                ? <YAxis tick={{ fill: C.textSoft, fontSize: 10 }} allowDecimals={false} />
+                : <YAxis tick={{ fill: C.textSoft, fontSize: 10 }} domain={[0, 4]} ticks={[1,2,3,4]} tickFormatter={v => (['','Nd','Bx','Md','Al'][v] || '')} />
+              }
               <Tooltip content={<RechartTooltip />} />
-              <Bar dataKey="presencas" name="Dias presente" radius={[4, 4, 0, 0]}>
-                {chartData.map((d, i) => {
-                  const c = d.presencas
-                  const color = c === 0              ? ATIVIDADE_COLORS['Não Definida']
-                              : c <= _cfg.baixaMax    ? ATIVIDADE_COLORS.Baixa
-                              : c <= _cfg.moderadaMax ? ATIVIDADE_COLORS.Moderada
-                              : ATIVIDADE_COLORS.Alta
-                  return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
-                })}
-              </Bar>
+              {usaPresenca ? (
+                <Bar dataKey="presencas" name="Dias presente" radius={[4, 4, 0, 0]}>
+                  {chartData.map((d, i) => {
+                    const c = d.presencas
+                    const color = c === 0              ? ATIVIDADE_COLORS['Não Definida']
+                                : c <= _cfg.baixaMax    ? ATIVIDADE_COLORS.Baixa
+                                : c <= _cfg.moderadaMax ? ATIVIDADE_COLORS.Moderada
+                                : ATIVIDADE_COLORS.Alta
+                    return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
+                  })}
+                </Bar>
+              ) : (
+                <Bar dataKey="valor" name="Atividade" radius={[4, 4, 0, 0]}>
+                  {chartData.map((d, i) => {
+                    const color = ATIVIDADE_COLORS[d.atividade] || C.textMuted
+                    return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
+                  })}
+                </Bar>
+              )}
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -5937,6 +5965,34 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
         return t
       })
       return updated.some((t, i) => t !== prev[i]) ? updated : prev
+    })
+  }, [dataLoaded])
+
+  // Reset mensal: salva atividade no histórico e zera para não-Em Teste (quando flag ativa)
+  useEffect(() => {
+    if (!dataLoaded || !_cfg.presencaApenasEmTeste) return
+    const hoje = new Date()
+    const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`
+    const resetKey = `rubinot_atividade_reset_${getServer()}_${mesAtual}`
+    if (localStorage.getItem(resetKey)) return
+    const mesPrev = (() => {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+    })()
+    pendingAuditRef.current = { skip: true }
+    setTutores(prev => {
+      const updated = prev.map(t => {
+        if (t.cargo === 'Em Teste') return t
+        const atividadeAtual = t.atividade || 'Não Definida'
+        const historico = [...(t.atividadeHistorico || [])]
+        if (!historico.find(h => h.mes === mesPrev)) {
+          historico.push({ mes: mesPrev, atividade: atividadeAtual })
+        }
+        return { ...t, atividade: 'Não Definida', atividadeHistorico: historico }
+      })
+      const changed = updated.some((t, i) => t !== prev[i])
+      if (changed) localStorage.setItem(resetKey, '1')
+      return changed ? updated : prev
     })
   }, [dataLoaded])
 
