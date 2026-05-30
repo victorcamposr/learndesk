@@ -2069,7 +2069,13 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
       if (t.id !== tutorId) return t
       if (removeId) {
         if (fromHistorico) return { ...t, ausenciaHistorico: (t.ausenciaHistorico || []).filter(a => a.id !== removeId) }
-        return { ...t, ausencias: (t.ausencias || []).filter(a => a.id !== removeId) }
+        // Mover ausência removida manualmente para o histórico
+        const removida = (t.ausencias || []).find(a => a.id === removeId)
+        return {
+          ...t,
+          ausencias: (t.ausencias || []).filter(a => a.id !== removeId),
+          ausenciaHistorico: removida ? [...(t.ausenciaHistorico || []), removida] : (t.ausenciaHistorico || []),
+        }
       }
       return { ...t, ausencias: [...(t.ausencias || []), novaAusencia] }
     }))
@@ -4534,6 +4540,7 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
 // ── TutorProfileModal ─────────────────────────────────────────────────────────
 function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDeleteAusenciaHistorico }) {
   const [copied, setCopied] = useState(false)
+  const [showHistorico, setShowHistorico] = useState(false)
 
   const handleCopy = () => {
     const texto = `ADICIONAR CARGOS/ REMOVER CARGOS\n\nDiscord: ${tutor.discord || ''}\nIn-game: ${tutor.nick}`
@@ -4590,6 +4597,8 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
     })
     return { days, count: marked.size, totalDays }
   }, [tutor, currentMonthKey])
+
+  useEffect(() => { if (!open) setShowHistorico(false) }, [open])
 
   if (!tutor) return null
 
@@ -4766,53 +4775,65 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
           </div>
         )}
 
-        {/* Histórico */}
+        {/* Histórico — colapsável */}
         {((tutor.obsHistorico?.length > 0) || (tutor.ausenciaHistorico?.length > 0)) && (
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <History size={12} /> Histórico
-            </div>
-
-            {(tutor.obsHistorico || []).length > 0 && (
-              <div style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 6 }}>Observações anteriores</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {[...(tutor.obsHistorico || [])].reverse().map(h => (
-                    <div key={h.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, color: C.textSoft, lineHeight: 1.5 }}>{h.texto}</div>
-                        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>{formatDate(h.data)}</div>
-                      </div>
-                      {onDeleteObsHistorico && (
-                        <button onClick={() => onDeleteObsHistorico(tutor.id, h.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
-                          <Trash2 size={13} />
-                        </button>
-                      )}
+            <button onClick={() => setShowHistorico(v => !v)} style={{
+              ...btn('ghost', 'sm'), width: '100%', justifyContent: 'space-between',
+              borderRadius: 8, padding: '7px 12px',
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <History size={12} />
+                Histórico
+                <span style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 99, fontSize: 10, fontWeight: 700, padding: '1px 6px', color: C.textMuted }}>
+                  {(tutor.obsHistorico?.length || 0) + (tutor.ausenciaHistorico?.length || 0)}
+                </span>
+              </span>
+              {showHistorico ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+            {showHistorico && (
+              <div style={{ marginTop: 10 }}>
+                {(tutor.obsHistorico || []).length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 6 }}>Observações anteriores</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {[...(tutor.obsHistorico || [])].reverse().map(h => (
+                        <div key={h.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, color: C.textSoft, lineHeight: 1.5 }}>{h.texto}</div>
+                            <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>{formatDate(h.data)}</div>
+                          </div>
+                          {onDeleteObsHistorico && (
+                            <button onClick={() => onDeleteObsHistorico(tutor.id, h.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(tutor.ausenciaHistorico || []).length > 0 && (
-              <div>
-                <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 6 }}>Ausências anteriores</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {[...(tutor.ausenciaHistorico || [])].reverse().map(a => (
-                    <div key={a.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Palmtree size={11} color={C.textMuted} style={{ flexShrink: 0 }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 12, color: C.textSoft }}>{a.motivo}</div>
-                        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{formatDate(a.dataInicio)} → {formatDate(a.dataFim)}</div>
-                      </div>
-                      {onDeleteAusenciaHistorico && (
-                        <button onClick={() => onDeleteAusenciaHistorico(tutor.id, a.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
-                          <Trash2 size={13} />
-                        </button>
-                      )}
+                  </div>
+                )}
+                {(tutor.ausenciaHistorico || []).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 6 }}>Ausências anteriores</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {[...(tutor.ausenciaHistorico || [])].reverse().map(a => (
+                        <div key={a.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Palmtree size={11} color={C.textMuted} style={{ flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, color: C.textSoft }}>{a.motivo}</div>
+                            <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{formatDate(a.dataInicio)} → {formatDate(a.dataFim)}</div>
+                          </div>
+                          {onDeleteAusenciaHistorico && (
+                            <button onClick={() => onDeleteAusenciaHistorico(tutor.id, a.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
