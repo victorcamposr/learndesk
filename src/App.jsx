@@ -542,7 +542,7 @@ function ToastProvider({ children }) {
     <ToastContext.Provider value={showToast}>
       {children}
       <div style={{
-        position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
+        position: 'fixed', top: 20, right: 28, zIndex: 9999,
         display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-end',
         pointerEvents: 'none',
       }}>
