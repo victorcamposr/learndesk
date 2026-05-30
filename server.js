@@ -542,7 +542,38 @@ app.get('/api/geo', async (req, res) => {
 })
 
 // ── Rotas protegidas ───────────────────────────────────────────────────────────
-app.get('/api/tutores', requireAuth, requireServerAccess, (req, res) => res.json(getKV(serverKey(req, 'tutores')) || []))
+app.get('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
+  const tutores = getKV(serverKey(req, 'tutores')) || []
+  const settings = getKV(serverKey(req, 'settings')) || {}
+
+  if (settings.presencaApenasEmTeste === true && settings.atividadeAutomatica !== false) {
+    const hoje = new Date()
+    const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`
+    const resetKey = serverKey(req, 'atividade_reset')
+    const ultimoReset = getKV(resetKey)
+
+    if (ultimoReset !== mesAtual) {
+      const mesPrev = (() => {
+        const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+      })()
+      const atualizados = tutores.map(t => {
+        if (t.cargo === 'Em Teste') return t
+        const historico = [...(t.atividadeHistorico || [])]
+        if (!historico.find(h => h.mes === mesPrev)) {
+          historico.push({ mes: mesPrev, atividade: t.atividade || 'Não Definida' })
+        }
+        return { ...t, atividade: 'Não Definida', atividadeHistorico: historico }
+      })
+      setKV(serverKey(req, 'tutores'), atualizados)
+      setKV(resetKey, mesAtual)
+      addAuditLog('sistema', 'atividade_reset_mensal', { server: req.headers['x-server'] || '?', mes: mesPrev })
+      return res.json(atualizados)
+    }
+  }
+
+  res.json(tutores)
+})
 
 app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
   const { tutores, _auditInfo } = req.body || {}

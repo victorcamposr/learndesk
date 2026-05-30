@@ -5968,34 +5968,6 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     })
   }, [dataLoaded])
 
-  // Reset mensal: salva atividade no histórico e zera para não-Em Teste (quando flag ativa)
-  useEffect(() => {
-    if (!dataLoaded || !_cfg.presencaApenasEmTeste) return
-    const hoje = new Date()
-    const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`
-    const resetKey = `rubinot_atividade_reset_${getServer()}_${mesAtual}`
-    if (localStorage.getItem(resetKey)) return
-    const mesPrev = (() => {
-      const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
-      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-    })()
-    pendingAuditRef.current = { skip: true }
-    setTutores(prev => {
-      const updated = prev.map(t => {
-        if (t.cargo === 'Em Teste') return t
-        const atividadeAtual = t.atividade || 'Não Definida'
-        const historico = [...(t.atividadeHistorico || [])]
-        if (!historico.find(h => h.mes === mesPrev)) {
-          historico.push({ mes: mesPrev, atividade: atividadeAtual })
-        }
-        return { ...t, atividade: 'Não Definida', atividadeHistorico: historico }
-      })
-      const changed = updated.some((t, i) => t !== prev[i])
-      if (changed) localStorage.setItem(resetKey, '1')
-      return changed ? updated : prev
-    })
-  }, [dataLoaded])
-
   // Salva no servidor a cada mudança (debounced 600ms)
   const saveTimer       = useRef(null)
   const fromPollRef     = useRef(false)
