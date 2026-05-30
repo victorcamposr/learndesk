@@ -574,6 +574,8 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
     return res.status(400).json({ error: 'Dados de tutores inválidos.' })
   const key = getKV('gemini_api_key') || process.env.GEMINI_API_KEY
   if (!key) return res.status(400).json({ error: 'API key não configurada. Acesse as configurações e insira sua chave Gemini.' })
+  const srvSettings = getKV(serverKey(req, 'settings')) || {}
+  const presencaApenasEmTeste = srvSettings.presencaApenasEmTeste === true
 
   const today = new Date()
   const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
@@ -651,7 +653,7 @@ REGRAS (ordem de prioridade):
       const tutorMap = {}
       for (const t of tutores) tutorMap[t.nick?.toLowerCase()] = t
       const removidas = []
-      const ATIVOS = ['Tutor', 'Em Teste', 'Sênior']
+      const ATIVOS = presencaApenasEmTeste ? ['Em Teste'] : ['Tutor', 'Em Teste', 'Sênior']
 
       parsed.acoes = parsed.acoes.filter(a => {
         if (a.tipo === 'add_presenca') {
@@ -709,7 +711,7 @@ REGRAS (ordem de prioridade):
       }
 
       // Aplica acoes diretamente no banco (evita depender do save client-side)
-      const ATIVOS = ['Tutor', 'Em Teste', 'Sênior']
+      const ATIVOS = presencaApenasEmTeste ? ['Em Teste'] : ['Tutor', 'Em Teste', 'Sênior']
       const storedKey = serverKey(req, 'tutores')
       const stored = getKV(storedKey) || []
       console.log(`[IA-APPLY] key=${storedKey} acoes=${JSON.stringify(parsed.acoes.map(a=>({tipo:a.tipo,nick:a.nick,data:a.data})))} stored_nicks=${stored.map(t=>t.nick).join('|')}`)
@@ -766,8 +768,8 @@ app.post('/api/settings', requireAuth, requireServerAccess, (req, res) => {
   const { settings } = req.body || {}
   if (!settings || typeof settings !== 'object' || Array.isArray(settings))
     return res.status(400).json({ error: 'Dados inválidos' })
-  const { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica } = settings
-  setKV(serverKey(req, 'settings'), { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica: atividadeAutomatica !== false })
+  const { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica, presencaApenasEmTeste } = settings
+  setKV(serverKey(req, 'settings'), { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica: atividadeAutomatica !== false, presencaApenasEmTeste: presencaApenasEmTeste === true })
   addAuditLog(getDeviceApelido(req) || 'admin', 'settings_save', { server: req.headers['x-server'] || '?', diasParaAlerta, baixaMax, moderadaMax })
   res.json({ ok: true })
 })

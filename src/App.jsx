@@ -66,7 +66,7 @@ const ATIVIDADES = ['Alta', 'Moderada', 'Baixa', 'Não Definida']
 const PERIODOS   = ['Manhã', 'Tarde', 'Noite']
 const DIAS_SEMANA = ['Semana', 'FDS', 'Ambos']
 
-const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15, atividadeAutomatica: true }
+const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15, atividadeAutomatica: true, presencaApenasEmTeste: false }
 
 let _cfg = { ...DEFAULT_CFG }
 
@@ -300,6 +300,7 @@ function normalizePhone(v) {
 }
 
 function diasSemPresenca(tutor) {
+  if (_cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste') return null
   const presencas = tutor.presencas || []
   const refDate = presencas.length > 0 ? [...presencas].sort().at(-1) : tutor.dataInicio
   if (!refDate) return null
@@ -328,6 +329,7 @@ function calcAtividadeFromPresencas(presencas = [], dataInicio) {
 
 function getAtividade(tutor) {
   if (!_cfg.atividadeAutomatica) return tutor.atividade || 'Não Definida'
+  if (_cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste') return tutor.atividade || 'Não Definida'
   return calcAtividadeFromPresencas(tutor.presencas, tutor.dataInicio)
 }
 
@@ -1228,7 +1230,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
           )}
 
           {/* Presença hoje */}
-          {_cfg.atividadeAutomatica && <div style={{ position: 'relative' }}>
+          {_cfg.atividadeAutomatica && (!_cfg.presencaApenasEmTeste || tutor.cargo === 'Em Teste') && <div style={{ position: 'relative' }}>
             <HoverTooltip content={<span style={{ fontSize: 12, color: C.text }}>{jaRegistrou ? 'Presença registrada hoje · clique para remover' : 'Registrar presença hoje'}</span>} width={220}>
               <button
                 style={{
@@ -1510,7 +1512,7 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
         )}
 
         {/* Presença */}
-        {_cfg.atividadeAutomatica && <div style={{ position: 'relative' }}>
+        {_cfg.atividadeAutomatica && (!_cfg.presencaApenasEmTeste || tutor.cargo === 'Em Teste') && <div style={{ position: 'relative' }}>
           <HoverTooltip width={220} side="top" content={
             <span style={{ fontSize: 12, color: C.text }}>
               {jaRegistrou ? 'Presença registrada hoje · clique para remover' : 'Registrar presença hoje'}
@@ -2015,7 +2017,8 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
     const ativos   = tutores.filter(t => t.cargo === 'Sênior' || t.cargo === 'Tutor' || t.cargo === 'Em Teste')
     const ausentes = ativos.filter(t => (t.ausencias || []).some(ausenciaAtiva))
     const alertas  = ativos.filter(t => getAtividade(t) === 'Baixa' || getAtividade(t) === 'Não Definida')
-    const presencasHoje = ativos.filter(t => (t.presencas || []).includes(hoje)).length
+    const comPresenca = _cfg.presencaApenasEmTeste ? ativos.filter(t => t.cargo === 'Em Teste') : ativos
+    const presencasHoje = comPresenca.filter(t => (t.presencas || []).includes(hoje)).length
     return { total: tutores.length, ativos: ativos.length, ausentes: ausentes.length, alertas: alertas.length, presencasHoje }
   }, [tutores, cfg])
 
@@ -3967,6 +3970,38 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
             </button>
           </div>
         </div>
+
+        {/* Toggle presença apenas Em Teste — só visível quando atividade automática */}
+        {form.atividadeAutomatica && <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Users size={13} color={form.presencaApenasEmTeste ? '#3b82f6' : C.textMuted} />
+                Presença apenas para Em Teste
+              </div>
+              <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
+                {form.presencaApenasEmTeste
+                  ? 'Somente tutores Em Teste têm presença contabilizada'
+                  : 'Todos os tutores têm presença contabilizada'}
+              </div>
+            </div>
+            <button
+              onClick={() => setBool('presencaApenasEmTeste', !form.presencaApenasEmTeste)}
+              style={{
+                width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
+                background: form.presencaApenasEmTeste ? '#3b82f6' : 'rgba(255,255,255,0.12)',
+                position: 'relative', flexShrink: 0, transition: 'background .2s',
+                boxShadow: form.presencaApenasEmTeste ? '0 0 10px #3b82f660' : 'none',
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 3, left: form.presencaApenasEmTeste ? 23 : 3,
+                width: 18, height: 18, borderRadius: '50%', background: '#fff',
+                transition: 'left .2s', boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+              }} />
+            </button>
+          </div>
+        </div>}
 
         {/* Regras de atividade (só visível quando automático) */}
         {form.atividadeAutomatica && <div>
