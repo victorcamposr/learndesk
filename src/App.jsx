@@ -2913,12 +2913,17 @@ function GeralView({ ativos, currentMonthKey }) {
 
 // ── DashboardTab ──────────────────────────────────────────────────────────────
 // ── PresencaHistoricoChart ────────────────────────────────────────────────────
-function PresencaHistoricoChart({ tutores }) {
+function PresencaHistoricoChart({ tutores, presencaApenasEmTeste }) {
   const [selected, setSelected] = useState('geral')
 
   const ativos = useMemo(() =>
     tutores.filter(t => t.cargo === 'Sênior' || t.cargo === 'Tutor' || t.cargo === 'Em Teste')
   , [tutores])
+
+  // Para a visão geral (heatmap/ranking): só Em Teste quando flag ativa
+  const ativosGeral = useMemo(() =>
+    presencaApenasEmTeste ? tutores.filter(t => t.cargo === 'Em Teste') : ativos
+  , [ativos, tutores, presencaApenasEmTeste])
 
   const meses = useMemo(() => {
     const hoje = new Date()
@@ -2931,22 +2936,40 @@ function PresencaHistoricoChart({ tutores }) {
     })
   }, [])
 
-  const chartData = useMemo(() => meses.map(m => {
-    let total = 0
-    if (selected === 'geral') {
-      ativos.forEach(t => { total += (t.presencas || []).filter(d => d.startsWith(m.key)).length })
-    } else {
-      const tutor = ativos.find(t => String(t.id) === selected)
-      total = tutor ? (tutor.presencas || []).filter(d => d.startsWith(m.key)).length : 0
-    }
-    return { name: m.label, presencas: total }
-  }), [meses, selected, ativos])
-
+  const currentMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })()
   const tutorSelecionado = selected !== 'geral' ? ativos.find(t => String(t.id) === selected) : null
-  const currentMonthKey  = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })()
+  const isNaoEmTeste = !!(tutorSelecionado && presencaApenasEmTeste && tutorSelecionado.cargo !== 'Em Teste')
+
+  const ATIV_NUM = { 'Alta': 4, 'Moderada': 3, 'Baixa': 2, 'Não Definida': 1 }
+
+  const chartData = useMemo(() => {
+    if (selected === 'geral') {
+      return meses.map(m => {
+        let total = 0
+        ativosGeral.forEach(t => { total += (t.presencas || []).filter(d => d.startsWith(m.key)).length })
+        return { name: m.label, presencas: total }
+      })
+    }
+    const startMonth = tutorSelecionado?.dataInicio?.slice(0, 7) || null
+    const mesesVisiveis = startMonth ? meses.filter(m => m.key >= startMonth) : meses
+    if (isNaoEmTeste) {
+      return mesesVisiveis.map(m => {
+        const historico = tutorSelecionado?.atividadeHistorico || []
+        const entrada = historico.find(h => h.mes === m.key)
+        const atv = m.key === currentMonthKey
+          ? (tutorSelecionado?.atividade || 'Não Definida')
+          : (entrada?.atividade || null)
+        return { name: m.label, valor: atv ? (ATIV_NUM[atv] || 0) : 0, atividade: atv || 'Sem dados' }
+      })
+    }
+    return mesesVisiveis.map(m => ({
+      name: m.label,
+      presencas: tutorSelecionado ? (tutorSelecionado.presencas || []).filter(d => d.startsWith(m.key)).length : 0,
+    }))
+  }, [meses, selected, ativosGeral, tutorSelecionado, isNaoEmTeste, currentMonthKey])
 
   const currentMonthInfo = useMemo(() => {
-    if (!tutorSelecionado) return null
+    if (!tutorSelecionado || isNaoEmTeste) return null
     const hoje      = new Date()
     const totalDays = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
     const marked    = new Set((tutorSelecionado.presencas || []).filter(d => d.startsWith(currentMonthKey)))
@@ -2956,7 +2979,7 @@ function PresencaHistoricoChart({ tutores }) {
       return { date, day: i + 1, marked: marked.has(date), future: date > todayStr() }
     })
     return { days, count: marked.size, totalDays }
-  }, [tutorSelecionado, currentMonthKey])
+  }, [tutorSelecionado, currentMonthKey, isNaoEmTeste])
 
   const atividade = tutorSelecionado ? getAtividade(tutorSelecionado) : null
 
@@ -2975,7 +2998,7 @@ function PresencaHistoricoChart({ tutores }) {
           <BarChart2 size={13} color={C.primaryBright} />
         </div>
         <h3 style={{ fontFamily: 'Cinzel, serif', color: C.text, fontSize: 13, fontWeight: 600, flex: 1 }}>
-          Histórico de Presenças
+          {isNaoEmTeste ? 'Histórico de Atividade' : 'Histórico de Presenças'}
         </h3>
         <select
           style={{ ...inputBase, width: 'auto', minWidth: 200, padding: '6px 12px', fontSize: 12 }}
@@ -3002,7 +3025,7 @@ function PresencaHistoricoChart({ tutores }) {
 
       {/* Visão Geral — heatmap + ranking */}
       {selected === 'geral' ? (
-        <GeralView ativos={ativos} currentMonthKey={currentMonthKey} />
+        <GeralView ativos={ativosGeral} currentMonthKey={currentMonthKey} />
       ) : (
         <>
         {/* Gráfico barras — últimos 6 meses */}
@@ -3010,17 +3033,29 @@ function PresencaHistoricoChart({ tutores }) {
           <BarChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
             <XAxis dataKey="name" tick={{ fill: C.textSoft, fontSize: 11 }} />
-            <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} allowDecimals={false} />
+            {isNaoEmTeste
+              ? <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} domain={[0, 4]} ticks={[1,2,3,4]} tickFormatter={v => (['','Nd','Bx','Md','Al'][v] || '')} />
+              : <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} allowDecimals={false} />
+            }
             <Tooltip content={<RechartTooltip />} />
-            <Bar dataKey="presencas" name="Dias presente" radius={[5, 5, 0, 0]}>
-              {chartData.map((d, i) => {
-                const color = d.presencas === 0          ? ATIVIDADE_COLORS['Não Definida']
-                            : d.presencas <= _cfg.baixaMax   ? ATIVIDADE_COLORS.Baixa
-                            : d.presencas <= _cfg.moderadaMax ? ATIVIDADE_COLORS.Moderada
-                            : ATIVIDADE_COLORS.Alta
-                return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
-              })}
-            </Bar>
+            {isNaoEmTeste ? (
+              <Bar dataKey="valor" name="Atividade" radius={[5, 5, 0, 0]}>
+                {chartData.map((d, i) => {
+                  const color = ATIVIDADE_COLORS[d.atividade] || C.textMuted
+                  return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
+                })}
+              </Bar>
+            ) : (
+              <Bar dataKey="presencas" name="Dias presente" radius={[5, 5, 0, 0]}>
+                {chartData.map((d, i) => {
+                  const color = d.presencas === 0           ? ATIVIDADE_COLORS['Não Definida']
+                              : d.presencas <= _cfg.baixaMax    ? ATIVIDADE_COLORS.Baixa
+                              : d.presencas <= _cfg.moderadaMax ? ATIVIDADE_COLORS.Moderada
+                              : ATIVIDADE_COLORS.Alta
+                  return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
+                })}
+              </Bar>
+            )}
           </BarChart>
         </ResponsiveContainer>
         </>
@@ -3232,7 +3267,7 @@ function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envCon
       </div>}
 
       {/* Histórico de presenças — só com atividade automática */}
-      {_cfg.atividadeAutomatica && <PresencaHistoricoChart tutores={tutores} />}
+      {_cfg.atividadeAutomatica && <PresencaHistoricoChart tutores={tutores} presencaApenasEmTeste={_cfg.presencaApenasEmTeste} />}
 
       {/* Charts */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 28 }}>
@@ -4479,17 +4514,19 @@ function TutorProfileModal({ tutor, open, onClose }) {
   }, [])
 
   const usaPresenca = !(_cfg.presencaApenasEmTeste && tutor?.cargo !== 'Em Teste')
+  const startMonth  = tutor?.dataInicio?.slice(0, 7) || null
 
   const ATIV_NUM = { 'Alta': 4, 'Moderada': 3, 'Baixa': 2, 'Não Definida': 1 }
 
   const chartData = useMemo(() => {
+    const mesesVisiveis = startMonth ? meses.filter(m => m.key >= startMonth) : meses
     if (usaPresenca) {
-      return meses.map(m => ({
+      return mesesVisiveis.map(m => ({
         name: m.label,
         presencas: (tutor?.presencas || []).filter(d => d.startsWith(m.key)).length,
       }))
     }
-    return meses.map(m => {
+    return mesesVisiveis.map(m => {
       const historico = tutor?.atividadeHistorico || []
       const entrada = historico.find(h => h.mes === m.key)
       const atv = m.key === currentMonthKey
@@ -4497,7 +4534,7 @@ function TutorProfileModal({ tutor, open, onClose }) {
         : (entrada?.atividade || null)
       return { name: m.label, valor: atv ? (ATIV_NUM[atv] || 0) : 0, atividade: atv || 'Sem dados' }
     })
-  }, [meses, tutor, usaPresenca])
+  }, [meses, tutor, usaPresenca, startMonth])
 
   const currentMonthInfo = useMemo(() => {
     if (!tutor) return null
