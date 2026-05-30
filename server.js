@@ -638,7 +638,8 @@ REGRAS (ordem de prioridade):
 6. AÇÃO DIRETA: nick+ação claros → execute sem pedir confirmação.
 6. CONFIRMAÇÕES ("sim","ok","pode","confirma"): execute exatamente o proposto na última mensagem. Nem mais, nem menos.
 7. add_presenca_todos: SOMENTE se usuário disser explicitamente "todos"/"todo mundo"/"geral".
-8. CONSULTAS: acoes:[] e responda em "resposta". Tutores com 0d NÃO são inativos. Para múltiplos, gere múltiplas acoes.`
+8. CONSULTAS: acoes:[] e responda em "resposta". Tutores com 0d NÃO são inativos. Para múltiplos, gere múltiplas acoes.${presencaApenasEmTeste ? `
+9. PRESENÇA RESTRITA: apenas tutores "Em Teste" têm presença contabilizada. NÃO adicione presença para outros cargos (Tutor, Sênior, Inativo). Se solicitado, informe que o tutor não está no período de teste.` : ''}`
 
   try {
     const genAI = new GoogleGenerativeAI(key)

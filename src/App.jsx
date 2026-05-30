@@ -897,7 +897,7 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
         </div>
         <div>
           <label style={labelStyle}><Activity size={12} /> Atividade</label>
-          {_cfg.atividadeAutomatica ? (
+          {_cfg.atividadeAutomatica && (!_cfg.presencaApenasEmTeste || form.cargo === 'Em Teste') ? (
             <div style={{ ...inputBase, display: 'flex', alignItems: 'center', gap: 10, cursor: 'default', opacity: 0.8 }}>
               <Badge label={getAtividade(form)} colorMap={ATIVIDADE_COLORS} />
               <span style={{ fontSize: 11, color: C.textMuted }}>calculada pelas presenças mensais</span>
@@ -1230,7 +1230,14 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
           )}
 
           {/* Presença hoje */}
-          {_cfg.atividadeAutomatica && (!_cfg.presencaApenasEmTeste || tutor.cargo === 'Em Teste') && <div style={{ position: 'relative' }}>
+          {_cfg.atividadeAutomatica && <div style={{ position: 'relative' }}>
+            {_cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste' ? (
+              <HoverTooltip content={<span style={{ fontSize: 12, color: C.textMuted }}>Presença não contabilizada — cargo fora do período de teste</span>} width={240}>
+                <button disabled style={{ ...btn('subtle', 'sm'), opacity: 0.25, cursor: 'not-allowed', color: C.textMuted, borderColor: C.border, background: 'transparent' }}>
+                  <CalendarPlus size={13} />
+                </button>
+              </HoverTooltip>
+            ) : (
             <HoverTooltip content={<span style={{ fontSize: 12, color: C.text }}>{jaRegistrou ? 'Presença registrada hoje · clique para remover' : 'Registrar presença hoje'}</span>} width={220}>
               <button
                 style={{
@@ -1244,6 +1251,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
                 {jaRegistrou ? <CalendarCheck size={13} /> : <CalendarPlus size={13} />}
               </button>
             </HoverTooltip>
+            )}
             {confirmPresenca && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 699 }} onClick={() => setConfirmPresenca(false)} />
@@ -1512,7 +1520,14 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
         )}
 
         {/* Presença */}
-        {_cfg.atividadeAutomatica && (!_cfg.presencaApenasEmTeste || tutor.cargo === 'Em Teste') && <div style={{ position: 'relative' }}>
+        {_cfg.atividadeAutomatica && <div style={{ position: 'relative' }}>
+          {_cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste' ? (
+            <HoverTooltip width={240} side="top" content={<span style={{ fontSize: 12, color: C.textMuted }}>Presença não contabilizada — cargo fora do período de teste</span>}>
+              <button disabled style={{ ...btn('subtle', 'sm'), opacity: 0.25, cursor: 'not-allowed', color: C.textMuted, borderColor: C.border, background: 'transparent' }}>
+                <CalendarPlus size={13} />
+              </button>
+            </HoverTooltip>
+          ) : (
           <HoverTooltip width={220} side="top" content={
             <span style={{ fontSize: 12, color: C.text }}>
               {jaRegistrou ? 'Presença registrada hoje · clique para remover' : 'Registrar presença hoje'}
@@ -1527,6 +1542,7 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
               {jaRegistrou ? <CalendarCheck size={13} /> : <CalendarPlus size={13} />}
             </button>
           </HoverTooltip>
+          )}
           {confirmPresenca && (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 699 }} onClick={() => setConfirmPresenca(false)} />
@@ -2017,9 +2033,11 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
     const ativos   = tutores.filter(t => t.cargo === 'Sênior' || t.cargo === 'Tutor' || t.cargo === 'Em Teste')
     const ausentes = ativos.filter(t => (t.ausencias || []).some(ausenciaAtiva))
     const alertas  = ativos.filter(t => getAtividade(t) === 'Baixa' || getAtividade(t) === 'Não Definida')
+    const emTeste = ativos.filter(t => t.cargo === 'Em Teste').length
     const comPresenca = _cfg.presencaApenasEmTeste ? ativos.filter(t => t.cargo === 'Em Teste') : ativos
+    const naoAptos = _cfg.presencaApenasEmTeste ? ativos.length - emTeste : 0
     const presencasHoje = comPresenca.filter(t => (t.presencas || []).includes(hoje)).length
-    return { total: tutores.length, ativos: ativos.length, ausentes: ausentes.length, alertas: alertas.length, presencasHoje }
+    return { total: tutores.length, ativos: ativos.length, ausentes: ausentes.length, alertas: alertas.length, presencasHoje, emTeste, naoAptos }
   }, [tutores, cfg])
 
   const ATIVIDADE_ORDER = { 'Alta': 0, 'Moderada': 1, 'Baixa': 2, 'Não Definida': 3 }
@@ -2048,7 +2066,7 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
       <div style={{ display: 'grid', gridTemplateColumns: _cfg.atividadeAutomatica ? 'repeat(5, 1fr) 1.4fr' : 'repeat(4, 1fr) 1.4fr', gap: 12, marginBottom: 24 }}>
         <StatPill icon={Users}         label="Total"           value={stats.total}         color={C.gold} />
         <StatPill icon={UserCheck}     label="Ativos"          value={stats.ativos}        color="#10b981" sub="Tutor + Em Teste" />
-        {_cfg.atividadeAutomatica && <StatPill icon={CalendarCheck} label="Presenças Hoje"  value={stats.presencasHoje} color={C.teal} sub={`de ${stats.ativos} ativos`} />}
+        {_cfg.atividadeAutomatica && <StatPill icon={CalendarCheck} label="Presenças Hoje"  value={stats.presencasHoje} color={C.teal} sub={_cfg.presencaApenasEmTeste ? `de ${stats.emTeste} em teste${stats.naoAptos > 0 ? ` · ${stats.naoAptos} sem contagem` : ''}` : `de ${stats.ativos} ativos`} />}
         <StatPill icon={Palmtree}      label="Em Ausência"     value={stats.ausentes}      color="#8b5cf6" />
         <StatPill icon={AlertTriangle} label="Atenção"         value={stats.alertas}       color="#f97316" sub="baixa atividade" />
         <AtividadeBar tutores={tutores} />
