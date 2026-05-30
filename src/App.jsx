@@ -328,6 +328,9 @@ function calcAtividadeFromPresencas(presencas = [], dataInicio) {
 }
 
 function getAtividade(tutor) {
+  // Usa valor pré-computado pelo servidor quando disponível (mais eficiente).
+  // É zerado localmente quando presencas ou cargo mudam, forçando recálculo local.
+  if (tutor.atividadeCalculada != null) return tutor.atividadeCalculada
   if (!_cfg.atividadeAutomatica) return tutor.atividade || 'Não Definida'
   if (_cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste') return tutor.atividade || 'Não Definida'
   return calcAtividadeFromPresencas(tutor.presencas, tutor.dataInicio)
@@ -526,6 +529,21 @@ function RechartTooltip({ active, payload, label }) {
           {p.name}: {p.value}
         </div>
       ))}
+    </div>
+  )
+}
+
+function AtividadeTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null
+  const atv = payload[0]?.payload?.atividade
+  const color = ATIVIDADE_COLORS[atv] || C.textMuted
+  return (
+    <div style={{
+      background: 'rgba(11,10,26,0.95)', backdropFilter: 'blur(12px)',
+      border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 14px',
+    }}>
+      {label && <div style={{ fontSize: 11, color: C.textSoft, marginBottom: 4 }}>{label}</div>}
+      <div style={{ color, fontSize: 13, fontWeight: 600 }}>{atv || 'Sem dados'}</div>
     </div>
   )
 }
@@ -855,7 +873,7 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
     const horariosStr = serializeHorarios(form.horariosSemana, form.horariosFDS)
     if (isEdit) {
       if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_edit', nick: form.nick }
-      setTutores(prev => prev.map(t => t.id === editId ? { ...form, id: editId, horarios: horariosStr } : t))
+      setTutores(prev => prev.map(t => t.id === editId ? { ...form, id: editId, horarios: horariosStr, atividadeCalculada: null, apto: null } : t))
     } else {
       if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_add', nick: form.nick }
       setTutores(prev => [...prev, { ...form, id: nextId(prev), horarios: horariosStr }])
@@ -2030,7 +2048,8 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
     setTutores(prev => prev.map(t => {
       if (t.id !== id) return t
       const presencas = t.presencas || []
-      return { ...t, presencas: add ? [...new Set([...presencas, hoje])] : presencas.filter(d => d !== hoje) }
+      // Zera campos computados para forçar recálculo local até próximo sync
+      return { ...t, presencas: add ? [...new Set([...presencas, hoje])] : presencas.filter(d => d !== hoje), atividadeCalculada: null, apto: null }
     }))
   }
   const handleAusencia    = (tutorId, novaAusencia, removeId) => {
@@ -3037,7 +3056,7 @@ function PresencaHistoricoChart({ tutores, presencaApenasEmTeste }) {
               ? <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} domain={[0, 4]} ticks={[1,2,3,4]} tickFormatter={v => (['','Nd','Bx','Md','Al'][v] || '')} />
               : <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} allowDecimals={false} />
             }
-            <Tooltip content={<RechartTooltip />} />
+            <Tooltip content={isNaoEmTeste ? <AtividadeTooltip /> : <RechartTooltip />} />
             {isNaoEmTeste ? (
               <Bar dataKey="valor" name="Atividade" radius={[5, 5, 0, 0]}>
                 {chartData.map((d, i) => {
@@ -4690,7 +4709,7 @@ function TutorProfileModal({ tutor, open, onClose }) {
                 ? <YAxis tick={{ fill: C.textSoft, fontSize: 10 }} allowDecimals={false} />
                 : <YAxis tick={{ fill: C.textSoft, fontSize: 10 }} domain={[0, 4]} ticks={[1,2,3,4]} tickFormatter={v => (['','Nd','Bx','Md','Al'][v] || '')} />
               }
-              <Tooltip content={<RechartTooltip />} />
+              <Tooltip content={usaPresenca ? <RechartTooltip /> : <AtividadeTooltip />} />
               {usaPresenca ? (
                 <Bar dataKey="presencas" name="Dias presente" radius={[4, 4, 0, 0]}>
                   {chartData.map((d, i) => {

@@ -216,6 +216,56 @@ Use SOMENTE os dados acima. Produza exatamente 4 seções (2-4 linhas cada), sem
 ## 👥 NECESSIDADES DA EQUIPE`
 }
 
+// ── Campos computados (atividade + elegibilidade) ─────────────────────────────
+function _calcAtividadeFromPresencas(presencas, dataInicio, baixaMax, moderadaMax, hoje) {
+  const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`
+  const count = (presencas || []).filter(d => d.startsWith(mesAtual)).length
+  if (count === 0) return 'Não Definida'
+  let adjusted = count
+  if (dataInicio && dataInicio.startsWith(mesAtual)) {
+    const joinDate = new Date(dataInicio)
+    const daysActive = Math.max(1, Math.floor((hoje - joinDate) / 86400000) + 1)
+    const totalDays = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
+    adjusted = Math.round(count * (totalDays / daysActive))
+  }
+  if (adjusted <= baixaMax) return 'Baixa'
+  if (adjusted <= moderadaMax) return 'Moderada'
+  return 'Alta'
+}
+
+function calcAtividade(tutor, settings, hoje) {
+  if (!settings.atividadeAutomatica) return tutor.atividade || 'Não Definida'
+  if (settings.presencaApenasEmTeste && tutor.cargo !== 'Em Teste') return tutor.atividade || 'Não Definida'
+  return _calcAtividadeFromPresencas(
+    tutor.presencas, tutor.dataInicio,
+    settings.baixaMax ?? 7, settings.moderadaMax ?? 15, hoje
+  )
+}
+
+function calcApto(tutor, atividadeCalculada, hoje) {
+  if (tutor.cargo === 'Inativo' || tutor.cargo === 'Desligado') return false
+  if (!tutor.dataInicio) return false
+  const inicio = new Date(tutor.dataInicio + 'T00:00:00')
+  const anoAtual = hoje.getFullYear()
+  const mesAtual = hoje.getMonth()
+  const anoI = inicio.getFullYear()
+  const mesI = inicio.getMonth()
+  const diaI = inicio.getDate()
+  if (anoI < anoAtual || (anoI === anoAtual && mesI < mesAtual)) return true
+  if (anoI === anoAtual && mesI === mesAtual) {
+    if (diaI <= 15) return true
+    if (diaI <= 16 && atividadeCalculada === 'Alta') return true
+  }
+  return false
+}
+
+function enrichTutores(tutores, settings, hoje) {
+  return tutores.map(t => {
+    const atividadeCalculada = calcAtividade(t, settings, hoje)
+    return { ...t, atividadeCalculada, apto: calcApto(t, atividadeCalculada, hoje) }
+  })
+}
+
 const serverKey = (req, key) => {
   const s = req.headers['x-server']
   return (s && getValidServers().includes(s)) ? `${key}:${s}` : key
@@ -543,36 +593,47 @@ app.get('/api/geo', async (req, res) => {
 
 // ── Rotas protegidas ───────────────────────────────────────────────────────────
 app.get('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
-  const tutores = getKV(serverKey(req, 'tutores')) || []
+  let tutores = getKV(serverKey(req, 'tutores')) || []
   const settings = getKV(serverKey(req, 'settings')) || {}
+  const hoje = new Date()
+  const todayIso = hoje.toISOString().slice(0, 10)
+  let modified = false
 
+  // Reset mensal de atividade
   if (settings.presencaApenasEmTeste === true && settings.atividadeAutomatica !== false) {
-    const hoje = new Date()
     const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`
     const resetKey = serverKey(req, 'atividade_reset')
-    const ultimoReset = getKV(resetKey)
-
-    if (ultimoReset !== mesAtual) {
+    if (getKV(resetKey) !== mesAtual) {
       const mesPrev = (() => {
         const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
         return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
       })()
-      const atualizados = tutores.map(t => {
+      tutores = tutores.map(t => {
         if (t.cargo === 'Em Teste') return t
         const historico = [...(t.atividadeHistorico || [])]
-        if (!historico.find(h => h.mes === mesPrev)) {
+        if (!historico.find(h => h.mes === mesPrev))
           historico.push({ mes: mesPrev, atividade: t.atividade || 'Não Definida' })
-        }
         return { ...t, atividade: 'Não Definida', atividadeHistorico: historico }
       })
-      setKV(serverKey(req, 'tutores'), atualizados)
       setKV(resetKey, mesAtual)
       addAuditLog('sistema', 'atividade_reset_mensal', { server: req.headers['x-server'] || '?', mes: mesPrev })
-      return res.json(atualizados)
+      modified = true
     }
   }
 
-  res.json(tutores)
+  // Auto-promoção: Em Teste → Tutor após 30 dias (usando data confiável do servidor)
+  tutores = tutores.map(t => {
+    if (t.cargo !== 'Em Teste' || !t.dataInicio) return t
+    const dias = Math.floor((hoje - new Date(t.dataInicio)) / 86400000)
+    if (dias < 30) return t
+    addAuditLog('sistema', 'auto_promocao', { nick: t.nick, dias, server: req.headers['x-server'] || '?' })
+    modified = true
+    return { ...t, cargo: 'Tutor', dataEfetivacao: t.dataEfetivacao || todayIso }
+  })
+
+  if (modified) setKV(serverKey(req, 'tutores'), tutores)
+
+  res.json(enrichTutores(tutores, settings, hoje))
 })
 
 app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
@@ -584,16 +645,22 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
       return res.status(400).json({ error: 'Tutor inválido: nick ausente' })
     if (!CARGOS_VALIDOS.includes(t.cargo))
       return res.status(400).json({ error: `Cargo inválido: ${t.cargo}` })
+    for (const a of (t.ausencias || [])) {
+      if (a.dataInicio && a.dataFim && a.dataFim < a.dataInicio)
+        return res.status(400).json({ error: `Ausência inválida para ${t.nick}: retorno anterior ao início` })
+    }
   }
+  // Strip campos computados — não persistir campos derivados
+  const cleaned = tutores.map(({ atividadeCalculada: _a, apto: _b, ...rest }) => rest)
   const server = req.headers['x-server'] || 'desconhecido'
   const actor = getDeviceApelido(req) || 'sistema'
   if (_auditInfo && typeof _auditInfo === 'object') {
     const { action, nick, details, skip } = _auditInfo
     if (!skip && action) addAuditLog(actor, action, { server, nick, ...(details || {}) })
   } else {
-    addAuditLog(actor, 'tutores_save', { server, count: tutores.length })
+    addAuditLog(actor, 'tutores_save', { server, count: cleaned.length })
   }
-  setKV(serverKey(req, 'tutores'), tutores)
+  setKV(serverKey(req, 'tutores'), cleaned)
   res.json({ ok: true })
 })
 
@@ -616,12 +683,19 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
   const diaSemana = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'][today.getDay()]
   const todosNicks = (tutores || []).map(t => `${t.nick} (${t.cargo})`).join(', ')
   const resumo = (tutores || []).map(t => {
+    const ausenciaAtiva = (t.ausencias || []).find(a => a.dataFim >= todayStr)
+    const ausenciaStr = ausenciaAtiva ? ` | AUSENTE até ${ausenciaAtiva.dataFim}` : ''
+    const obsStr = t.obs ? ` | obs: ${t.obs}` : ''
+
+    if (presencaApenasEmTeste && t.cargo !== 'Em Teste') {
+      return `- ${t.nick} | cargo: ${t.cargo} | na equipe desde: ${t.dataInicio || '?'} | atividade: ${t.atividade || 'Não Definida'} | SEM RASTREAMENTO DE PRESENÇA${ausenciaStr}${obsStr}`
+    }
+
     const mesAtual = todayStr.slice(0, 7)
     const todasPresencas = (t.presencas || []).slice().sort()
     const presencasMesLista = todasPresencas.filter(d => d.startsWith(mesAtual))
     const presencasMes = presencasMesLista.length
     const ultimaPresenca = todasPresencas.at(-1) || null
-    const ausenciaAtiva = (t.ausencias || []).find(a => a.dataFim >= todayStr)
     const refDate = ultimaPresenca || t.dataInicio || todayStr
     const diasSem = Math.floor((new Date(todayStr) - new Date(refDate)) / 86400000)
     const semInfo = ultimaPresenca
@@ -633,7 +707,7 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
     const todasDatas = todasPresencas.length
       ? ` | TODAS AS PRESENÇAS REGISTRADAS (use para dedup): [${todasPresencas.join(', ')}]`
       : ' | nenhuma presença registrada'
-    return `- ${t.nick} | cargo: ${t.cargo} | na equipe desde: ${t.dataInicio || '?'} | presenças este mês: ${presencasMes}${datasPresenca}${todasDatas} | ${semInfo}${ausenciaAtiva ? ` | AUSENTE até ${ausenciaAtiva.dataFim}` : ''}${t.obs ? ` | obs: ${t.obs}` : ''}`
+    return `- ${t.nick} | cargo: ${t.cargo} | na equipe desde: ${t.dataInicio || '?'} | presenças este mês: ${presencasMes}${datasPresenca}${todasDatas} | ${semInfo}${ausenciaStr}${obsStr}`
   }).join('\n')
 
   const historicoFmt = (history || []).slice(-8).map(m =>
@@ -785,7 +859,7 @@ REGRAS (ordem de prioridade):
       setKV(storedKey, updatedStored)
       const afterNeo = updatedStored.find(t => t.nick?.toLowerCase().includes('neo'))
       console.log(`[IA-APPLY] saved. neo_presencas=${JSON.stringify(afterNeo?.presencas)}`)
-      parsed._tutores = updatedStored
+      parsed._tutores = enrichTutores(updatedStored, srvSettings, new Date())
     }
 
     res.json(parsed)
