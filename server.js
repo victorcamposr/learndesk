@@ -618,7 +618,14 @@ USUÁRIO: "${message}"
 
 Responda SOMENTE JSON puro: { "resposta": "...", "acoes": [] }
 
-AÇÕES: add_presenca{nick,data} | remove_presenca{nick,data} | add_presenca_todos{data,exceto:[]} | add_ausencia{nick,dataInicio,dataFim,motivo} | remove_ausencia{nick} | change_cargo{nick,cargo:Tutor|Em Teste|Sênior|Inativo|Desligado} | add_obs{nick,obs}
+AÇÕES — cada objeto DEVE ter o campo "tipo" exatamente como abaixo:
+{"tipo":"add_presenca","nick":"...","data":"YYYY-MM-DD"}
+{"tipo":"remove_presenca","nick":"...","data":"YYYY-MM-DD"}
+{"tipo":"add_presenca_todos","data":"YYYY-MM-DD","exceto":[]}
+{"tipo":"add_ausencia","nick":"...","dataInicio":"YYYY-MM-DD","dataFim":"YYYY-MM-DD","motivo":"..."}
+{"tipo":"remove_ausencia","nick":"..."}
+{"tipo":"change_cargo","nick":"...","cargo":"Tutor|Em Teste|Sênior|Inativo|Desligado"}
+{"tipo":"add_obs","nick":"...","obs":"..."}
 
 REGRAS (ordem de prioridade):
 1. DEDUP: antes de add_presenca OU add_presenca_todos, cheque "TODAS AS PRESENÇAS REGISTRADAS" — se data já existe para o nick → acoes:[], informe que já existe. Sem exceções.
