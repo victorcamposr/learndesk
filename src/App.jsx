@@ -726,8 +726,8 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
     onClose()
   }
 
-  const ativas    = (tutor?.ausencias || []).filter(ausenciaAtiva)
-  const expiradas = (tutor?.ausencias || []).filter(a => !ausenciaAtiva(a))
+  const ativas    = tutor?.ausencias || []
+  const expiradas = tutor?.ausenciaHistorico || []
   const inp = field => ({ ...inputBase, borderColor: errors[field] ? '#ef4444' : C.border })
 
   return (
@@ -772,7 +772,7 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
       {expiradas.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8 }}>
-            Histórico expirado
+            Histórico
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {expiradas.map(a => (
@@ -787,7 +787,7 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
                 {confirmRemoveId === a.id ? (
                   <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
                     <span style={{ fontSize: 11, color: '#f87171' }}>Remover?</span>
-                    <button style={{ ...btn('danger', 'sm'), padding: '3px 10px' }} onClick={() => { onSave(null, a.id); setConfirmRemoveId(null) }}>Sim</button>
+                    <button style={{ ...btn('danger', 'sm'), padding: '3px 10px' }} onClick={() => { onSave(null, a.id, true); setConfirmRemoveId(null) }}>Sim</button>
                     <button style={{ ...btn('ghost', 'sm'), padding: '3px 8px' }} onClick={() => setConfirmRemoveId(null)}>Não</button>
                   </div>
                 ) : (
@@ -837,6 +837,7 @@ const BLANK = {
   nick: '', nomeRL: '', celular: '', discord: '', cargo: 'Em Teste',
   atividade: 'Não Definida', dataInicio: '', horariosSemana: [], horariosFDS: [],
   detalheHorario: '', obs: '', ausencias: [], dataEfetivacao: '', presencas: [],
+  obsHistorico: [], ausenciaHistorico: [],
 }
 const PERIODO_ICONS = { Manhã: Sun, Tarde: Sunset, Noite: Moon }
 
@@ -2039,7 +2040,16 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
   const handleSaveObs     = (id, text) => {
     const tutor = tutores.find(t => t.id === id)
     if (pendingAuditRef) pendingAuditRef.current = { action: 'obs_add', nick: tutor?.nick }
-    setTutores(prev => prev.map(t => t.id === id ? { ...t, obs: text } : t))
+    setTutores(prev => prev.map(t => {
+      if (t.id !== id) return t
+      const oldObs = (t.obs || '').trim()
+      if (oldObs && oldObs !== text.trim()) {
+        // Move obs antiga para histórico antes de substituir
+        const entrada = { id: Date.now(), texto: oldObs, data: todayStr() }
+        return { ...t, obs: text, obsHistorico: [...(t.obsHistorico || []), entrada] }
+      }
+      return { ...t, obs: text }
+    }))
   }
   const handlePresenca    = (id, add) => {
     const hoje = todayStr()
@@ -2052,14 +2062,22 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
       return { ...t, presencas: add ? [...new Set([...presencas, hoje])] : presencas.filter(d => d !== hoje), atividadeCalculada: null, apto: null }
     }))
   }
-  const handleAusencia    = (tutorId, novaAusencia, removeId) => {
+  const handleAusencia    = (tutorId, novaAusencia, removeId, fromHistorico = false) => {
     const tutor = tutores.find(t => t.id === tutorId)
     if (pendingAuditRef) pendingAuditRef.current = { action: removeId ? 'ausencia_remove' : 'ausencia_add', nick: tutor?.nick }
     setTutores(prev => prev.map(t => {
       if (t.id !== tutorId) return t
-      if (removeId) return { ...t, ausencias: (t.ausencias || []).filter(a => a.id !== removeId) }
+      if (removeId) {
+        if (fromHistorico) return { ...t, ausenciaHistorico: (t.ausenciaHistorico || []).filter(a => a.id !== removeId) }
+        return { ...t, ausencias: (t.ausencias || []).filter(a => a.id !== removeId) }
+      }
       return { ...t, ausencias: [...(t.ausencias || []), novaAusencia] }
     }))
+  }
+  const handleDeleteObsHistorico = (tutorId, entradaId) => {
+    setTutores(prev => prev.map(t =>
+      t.id === tutorId ? { ...t, obsHistorico: (t.obsHistorico || []).filter(h => h.id !== entradaId) } : t
+    ))
   }
 
   const ausenciaTutor = ausenciaId !== null ? tutores.find(t => t.id === ausenciaId) : null
@@ -2244,9 +2262,9 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
         tutor={ausenciaTutor}
         open={ausenciaId !== null}
         onClose={() => setAusenciaId(null)}
-        onSave={(nova, removeId) => {
+        onSave={(nova, removeId, fromHistorico) => {
           if (nova) handleAusencia(ausenciaId, nova, null)
-          else handleAusencia(ausenciaId, null, removeId)
+          else handleAusencia(ausenciaId, null, removeId, fromHistorico)
         }}
       />
 
@@ -2261,6 +2279,8 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
         tutor={profileTutor}
         open={profileId !== null}
         onClose={() => setProfileId(null)}
+        onDeleteObsHistorico={handleDeleteObsHistorico}
+        onDeleteAusenciaHistorico={(tutorId, id) => handleAusencia(tutorId, null, id, true)}
       />
     </div>
   )
@@ -4512,7 +4532,7 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
 }
 
 // ── TutorProfileModal ─────────────────────────────────────────────────────────
-function TutorProfileModal({ tutor, open, onClose }) {
+function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDeleteAusenciaHistorico }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = () => {
@@ -4740,9 +4760,61 @@ function TutorProfileModal({ tutor, open, onClose }) {
         {tutor.obs && (
           <div style={{ background: `${C.gold}0a`, border: `1px solid ${C.gold}25`, borderRadius: 10, padding: '10px 14px' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: C.gold, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
-              <StickyNote size={11} /> Observação
+              <StickyNote size={11} /> Observação atual
             </div>
             <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6 }}>{tutor.obs}</div>
+          </div>
+        )}
+
+        {/* Histórico */}
+        {((tutor.obsHistorico?.length > 0) || (tutor.ausenciaHistorico?.length > 0)) && (
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <History size={12} /> Histórico
+            </div>
+
+            {(tutor.obsHistorico || []).length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 6 }}>Observações anteriores</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {[...(tutor.obsHistorico || [])].reverse().map(h => (
+                    <div key={h.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: C.textSoft, lineHeight: 1.5 }}>{h.texto}</div>
+                        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>{formatDate(h.data)}</div>
+                      </div>
+                      {onDeleteObsHistorico && (
+                        <button onClick={() => onDeleteObsHistorico(tutor.id, h.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(tutor.ausenciaHistorico || []).length > 0 && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 6 }}>Ausências anteriores</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {[...(tutor.ausenciaHistorico || [])].reverse().map(a => (
+                    <div key={a.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Palmtree size={11} color={C.textMuted} style={{ flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: C.textSoft }}>{a.motivo}</div>
+                        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{formatDate(a.dataInicio)} → {formatDate(a.dataFim)}</div>
+                      </div>
+                      {onDeleteAusenciaHistorico && (
+                        <button onClick={() => onDeleteAusenciaHistorico(tutor.id, a.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }} title="Apagar">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

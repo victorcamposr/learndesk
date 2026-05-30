@@ -631,6 +631,20 @@ app.get('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
     return { ...t, cargo: 'Tutor', dataEfetivacao: t.dataEfetivacao || todayIso }
   })
 
+  // Auto-mover ausências expiradas para ausenciaHistorico
+  tutores = tutores.map(t => {
+    const ausencias = t.ausencias || []
+    const expiradas = ausencias.filter(a => a.dataFim && a.dataFim < todayIso)
+    if (expiradas.length === 0) return t
+    const ativas = ausencias.filter(a => !a.dataFim || a.dataFim >= todayIso)
+    const historico = t.ausenciaHistorico || []
+    const idsExistentes = new Set(historico.map(a => String(a.id)))
+    const novas = expiradas.filter(a => !idsExistentes.has(String(a.id)))
+    if (novas.length === 0) return t
+    modified = true
+    return { ...t, ausencias: ativas, ausenciaHistorico: [...historico, ...novas] }
+  })
+
   if (modified) setKV(serverKey(req, 'tutores'), tutores)
 
   res.json(enrichTutores(tutores, settings, hoje))
@@ -662,9 +676,21 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
       if (typeof d === 'string' && d > maxPresencaDate)
         return res.status(400).json({ error: `Presença com data futura inválida: ${t.nick} (${d})` })
     }
-    for (const a of (t.ausencias || [])) {
+    const ausencias = t.ausencias || []
+    for (let i = 0; i < ausencias.length; i++) {
+      const a = ausencias[i]
       if (a.dataInicio && a.dataFim && a.dataFim < a.dataInicio)
         return res.status(400).json({ error: `Ausência inválida para ${t.nick}: retorno anterior ao início` })
+      // Ausência não pode começar antes da entrada do tutor
+      if (t.dataInicio && a.dataInicio && a.dataInicio < t.dataInicio)
+        return res.status(400).json({ error: `Ausência de ${t.nick} anterior à data de entrada` })
+      // Ausências sobrepostas
+      for (let j = i + 1; j < ausencias.length; j++) {
+        const b = ausencias[j]
+        if (a.dataInicio && a.dataFim && b.dataInicio && b.dataFim &&
+            a.dataInicio <= b.dataFim && b.dataInicio <= a.dataFim)
+          return res.status(400).json({ error: `Ausências sobrepostas para ${t.nick}` })
+      }
     }
   }
   // Strip campos computados — não persistir campos derivados
