@@ -640,11 +640,28 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
   const { tutores, _auditInfo } = req.body || {}
   if (!Array.isArray(tutores)) return res.status(400).json({ error: 'Dados inválidos' })
   const CARGOS_VALIDOS = ['Tutor', 'Em Teste', 'Sênior', 'Inativo', 'Desligado']
+  const todayIso = new Date().toISOString().slice(0, 10)
+  // Amanhã com margem de 1 dia para fuso (aceita até 1 dia à frente por segurança)
+  const maxPresencaDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+  const nicksVistos = new Set()
   for (const t of tutores) {
     if (typeof t !== 'object' || t === null || typeof t.nick !== 'string' || !t.nick.trim())
       return res.status(400).json({ error: 'Tutor inválido: nick ausente' })
     if (!CARGOS_VALIDOS.includes(t.cargo))
       return res.status(400).json({ error: `Cargo inválido: ${t.cargo}` })
+    // Nick único (case-insensitive)
+    const nickLower = t.nick.trim().toLowerCase()
+    if (nicksVistos.has(nickLower))
+      return res.status(400).json({ error: `Nick duplicado: ${t.nick}` })
+    nicksVistos.add(nickLower)
+    // dataInicio não pode ser futura
+    if (t.dataInicio && t.dataInicio > todayIso)
+      return res.status(400).json({ error: `Data de início futura inválida: ${t.nick}` })
+    // Presenças não podem ser datas muito futuras
+    for (const d of (t.presencas || [])) {
+      if (typeof d === 'string' && d > maxPresencaDate)
+        return res.status(400).json({ error: `Presença com data futura inválida: ${t.nick} (${d})` })
+    }
     for (const a of (t.ausencias || [])) {
       if (a.dataInicio && a.dataFim && a.dataFim < a.dataInicio)
         return res.status(400).json({ error: `Ausência inválida para ${t.nick}: retorno anterior ao início` })
