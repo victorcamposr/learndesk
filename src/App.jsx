@@ -15,6 +15,12 @@ import {
   Globe, Rocket, ArrowLeftRight, LayoutGrid, List,
   Lock, Crown, Palette, Swords, Download,
   Flame, Zap, Star, Gem, Monitor, BookOpen,
+  Compass, Anchor, Trophy, Heart, TreePine, Mountain,
+  Waves, Wind, Map, Feather, Target, Snowflake,
+  Cloud, Leaf, Key, Ghost, Wand2, Axe, Sword, Crosshair,
+  Skull, Fish, Flower, Castle, Dices, Scroll, Infinity,
+  Hexagon, Triangle, Diamond, Layers, Radio, Telescope,
+  Binoculars, Microscope, Sunrise, Tornado,
 } from 'lucide-react'
 
 const mkRoman = r => ({ size = 16, color = 'currentColor' }) => (
@@ -22,8 +28,28 @@ const mkRoman = r => ({ size = 16, color = 'currentColor' }) => (
 )
 const RomanI = mkRoman('I'), RomanII = mkRoman('II'), RomanIII = mkRoman('III'), RomanIV = mkRoman('IV'), RomanV = mkRoman('V')
 
-const SERVER_ICON_MAP = { globe: Globe, swords: Swords, shield: Shield, crown: Crown, flame: Flame, zap: Zap, star: Star, gem: Gem, sparkles: Sparkles, moon: Moon, roman1: RomanI, roman2: RomanII, roman3: RomanIII, roman4: RomanIV, roman5: RomanV }
-const SERVER_ICON_LIST = ['globe','swords','shield','crown','flame','zap','star','gem','sparkles','moon','roman1','roman2','roman3','roman4','roman5']
+const SERVER_ICON_MAP = {
+  globe: Globe, swords: Swords, sword: Sword, axe: Axe, shield: Shield, crown: Crown,
+  flame: Flame, zap: Zap, star: Star, gem: Gem, sparkles: Sparkles, moon: Moon,
+  sun: Sun, sunrise: Sunrise, snowflake: Snowflake, wind: Wind, tornado: Tornado, cloud: Cloud, waves: Waves,
+  treepine: TreePine, mountain: Mountain, leaf: Leaf, flower: Flower, feather: Feather, fish: Fish,
+  compass: Compass, map: Map, anchor: Anchor, rocket: Rocket, telescope: Telescope, binoculars: Binoculars,
+  trophy: Trophy, heart: Heart, key: Key, skull: Skull, ghost: Ghost, wand: Wand2,
+  target: Target, crosshair: Crosshair, eye: Eye, layers: Layers, hexagon: Hexagon,
+  dices: Dices, scroll: Scroll, bookopen: BookOpen,
+  roman1: RomanI, roman2: RomanII, roman3: RomanIII, roman4: RomanIV, roman5: RomanV,
+}
+const SERVER_ICON_LIST = [
+  'globe','swords','sword','axe','shield','crown',
+  'flame','zap','sparkles','star','gem','wand',
+  'moon','sun','sunrise','snowflake','wind','tornado','cloud','waves',
+  'treepine','mountain','leaf','flower','feather','fish',
+  'compass','map','anchor','rocket','telescope','binoculars',
+  'trophy','heart','key','skull','ghost',
+  'target','crosshair','eye','layers','hexagon',
+  'dices','scroll','bookopen',
+  'roman1','roman2','roman3','roman4','roman5',
+]
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
@@ -172,10 +198,47 @@ const DEFAULT_SERVERS = [
 let SERVERS = [...DEFAULT_SERVERS]
 
 const ENV_COLORS = [
-  '#6366f1', '#f59e0b', '#10b981', '#ec4899',
-  '#3b82f6', '#8b5cf6', '#ef4444', '#14b8a6',
-  '#f97316', '#84cc16', '#e879f9', '#fbbf24',
+  '#6366f1', '#818cf8', '#3b82f6', '#06b6d4', '#14b8a6', '#10b981',
+  '#84cc16', '#f59e0b', '#f97316', '#ef4444', '#ec4899', '#e879f9',
+  '#8b5cf6', '#a78bfa', '#38bdf8', '#34d399', '#fbbf24', '#fb923c',
+  '#f87171', '#f472b6', '#c084fc', '#ffffff', '#94a3b8', '#475569',
 ]
+
+function EnvColorPicker({ value, onChange }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {ENV_COLORS.map(c => (
+          <button key={c} onClick={() => onChange(c)} title={c} style={{
+            width: 22, height: 22, borderRadius: 5, background: c,
+            border: `2px solid ${value === c ? '#fff' : 'rgba(255,255,255,0.12)'}`,
+            cursor: 'pointer', transform: value === c ? 'scale(1.25)' : 'none',
+            transition: 'transform .1s', flexShrink: 0,
+            boxShadow: value === c ? `0 0 0 2px ${c}60` : 'none',
+          }} />
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ position: 'relative', width: 32, height: 32 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: 8, background: value,
+            border: '2px solid rgba(255,255,255,0.2)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+          }}>
+            <input type="color" value={value} onChange={e => onChange(e.target.value)}
+              style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: C.textMuted }}>
+          Ou clique para escolher qualquer cor →
+        </div>
+        <div style={{ fontFamily: 'monospace', fontSize: 12, color: value, background: 'rgba(255,255,255,0.06)', padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)' }}>
+          {value}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const API  = import.meta.env.VITE_API_URL || ''
 const BASE = import.meta.env.BASE_URL
@@ -4376,24 +4439,17 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
               </div>
               <div>
                 <label style={labelStyle}><Palette size={11} /> Cor</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {ENV_COLORS.map(c => (
-                    <button key={c} onClick={() => setEditColor(c)} style={{
-                      width: 24, height: 24, borderRadius: 6, background: c,
-                      border: `2px solid ${editColor === c ? '#fff' : 'transparent'}`,
-                      cursor: 'pointer', transform: editColor === c ? 'scale(1.2)' : 'none', transition: 'transform .1s',
-                    }} />
-                  ))}
-                </div>
+                <EnvColorPicker value={editColor} onChange={setEditColor} />
               </div>
               <div>
                 <label style={labelStyle}><Sparkles size={11} /> Ícone</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 180, overflowY: 'auto', padding: '4px 2px' }}>
                   {SERVER_ICON_LIST.map(ic => { const Ic = SERVER_ICON_MAP[ic]; return (
-                    <button key={ic} onClick={() => setEditIcon(ic)} style={{
-                      width: 32, height: 32, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    <button key={ic} title={ic} onClick={() => setEditIcon(ic)} style={{
+                      width: 34, height: 34, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                       background: editIcon === ic ? `${editColor}22` : 'rgba(255,255,255,0.03)',
-                      border: `2px solid ${editIcon === ic ? editColor + '80' : C.border}`,
+                      border: `2px solid ${editIcon === ic ? editColor + '99' : C.border}`,
+                      transition: 'border-color .12s, background .12s',
                     }}><Ic size={15} color={editIcon === ic ? editColor : C.textMuted} /></button>
                   )})}
                 </div>
@@ -4461,23 +4517,17 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
             </div>
             <div>
               <label style={labelStyle}><Palette size={11} /> Cor</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {ENV_COLORS.map(c => (
-                  <button key={c} onClick={() => setNewColor(c)} style={{
-                    width: 28, height: 28, borderRadius: 7, background: c, border: `2px solid ${newColor === c ? '#fff' : 'transparent'}`,
-                    cursor: 'pointer', transition: 'transform .1s', transform: newColor === c ? 'scale(1.2)' : 'none',
-                  }} />
-                ))}
-              </div>
+              <EnvColorPicker value={newColor} onChange={setNewColor} />
             </div>
             <div>
               <label style={labelStyle}><Sparkles size={11} /> Ícone</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 180, overflowY: 'auto', padding: '4px 2px' }}>
                 {SERVER_ICON_LIST.map(ic => { const Ic = SERVER_ICON_MAP[ic]; return (
-                  <button key={ic} onClick={() => setNewIcon(ic)} style={{
-                    width: 32, height: 32, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  <button key={ic} title={ic} onClick={() => setNewIcon(ic)} style={{
+                    width: 34, height: 34, borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                     background: newIcon === ic ? `${newColor}22` : 'rgba(255,255,255,0.03)',
-                    border: `2px solid ${newIcon === ic ? newColor + '80' : C.border}`,
+                    border: `2px solid ${newIcon === ic ? newColor + '99' : C.border}`,
+                    transition: 'border-color .12s, background .12s',
                   }}><Ic size={15} color={newIcon === ic ? newColor : C.textMuted} /></button>
                 )})}
               </div>
