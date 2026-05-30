@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback, createContext, useContext } from 'react'
 import * as XLSX from 'xlsx'
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
@@ -475,26 +475,84 @@ function BackgroundOrbs() {
   )
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
-function Toast({ message, color = '#10b981', icon: Icon, onClose }) {
+// ── Toast system ──────────────────────────────────────────────────────────────
+const ToastContext = createContext(null)
+const useToast = () => useContext(ToastContext)
+
+const TOAST_TYPES = {
+  success: { color: '#10b981', Icon: Check },
+  error:   { color: '#ef4444', Icon: X },
+  warning: { color: '#f59e0b', Icon: AlertTriangle },
+  info:    { color: '#3b82f6', Icon: Bell },
+}
+const TOAST_DURATION = 4000
+
+function ToastItem({ toast, onRemove }) {
+  const [exiting, setExiting] = useState(false)
+
+  const dismiss = useCallback(() => {
+    setExiting(true)
+    setTimeout(onRemove, 280)
+  }, [onRemove])
+
   useEffect(() => {
-    const t = setTimeout(onClose, 3500)
+    const t = setTimeout(dismiss, TOAST_DURATION)
     return () => clearTimeout(t)
-  }, [onClose])
+  }, [dismiss])
+
+  const { color, Icon } = TOAST_TYPES[toast.type] || TOAST_TYPES.success
+
   return (
-    <div style={{
-      position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
+    <div className={exiting ? 'toast-exit' : 'toast-enter'} style={{
       background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)',
       border: `1px solid ${color}50`, borderRadius: 12,
-      padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10,
+      padding: '12px 18px 18px',
+      display: 'flex', alignItems: 'center', gap: 10,
       boxShadow: `0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px ${color}20`,
+      position: 'relative', overflow: 'hidden',
+      minWidth: 220, maxWidth: 340,
     }}>
-      {Icon && <Icon size={16} color={color} />}
-      <span style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{message}</span>
-      <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', marginLeft: 4 }}>
-        <X size={14} />
+      <Icon size={15} color={color} style={{ flexShrink: 0 }} />
+      <span style={{ fontSize: 13, color: C.text, fontWeight: 600, flex: 1, lineHeight: 1.4 }}>{toast.message}</span>
+      <button onClick={dismiss} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2, display: 'flex', flexShrink: 0 }}>
+        <X size={13} />
       </button>
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, height: 2,
+        background: `linear-gradient(90deg, ${color}, ${color}80)`,
+        animation: `toast-progress ${TOAST_DURATION}ms linear forwards`,
+      }} />
     </div>
+  )
+}
+
+function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([])
+
+  const showToast = useCallback((message, type = 'success') => {
+    const id = Date.now() + Math.random()
+    setToasts(prev => [...prev, { id, message, type }])
+  }, [])
+
+  const removeToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id))
+  }, [])
+
+  return (
+    <ToastContext.Provider value={showToast}>
+      {children}
+      <div style={{
+        position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
+        display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-end',
+        pointerEvents: 'none',
+      }}>
+        {toasts.map(t => (
+          <div key={t.id} style={{ pointerEvents: 'auto' }}>
+            <ToastItem toast={t} onRemove={() => removeToast(t.id)} />
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
   )
 }
 
@@ -3682,10 +3740,8 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const [loading, setLoading]               = useState(false)
   const [search, setSearch]                 = useState('')
   const [statusFilter, setStatusFilter]     = useState('all')
-  const [toast, setToast]                   = useState(null)
   const prevPendingRef                      = useRef(-1)
-
-  const showToast = (msg, color = '#10b981') => setToast({ msg, color })
+  const showToast                           = useToast()
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -3700,7 +3756,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
         const pendingNow = list.filter(d => d.status === 'pending').length
         if (prevPendingRef.current >= 0 && pendingNow > prevPendingRef.current) {
           const diff = pendingNow - prevPendingRef.current
-          showToast(`${diff} nova${diff > 1 ? 's' : ''} solicitação${diff > 1 ? 'ões' : ''} de acesso`, C.gold)
+          showToast(`${diff} nova${diff > 1 ? 's' : ''} solicitação${diff > 1 ? 'ões' : ''} de acesso`, 'warning')
         }
         prevPendingRef.current = pendingNow
         setDevices(list)
@@ -3721,8 +3777,8 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const act = async (url, token) => {
     await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
     if (url.includes('approve')) showToast('Dispositivo aprovado')
-    else if (url.includes('deny')) showToast('Acesso negado', '#ef4444')
-    else if (url.includes('delete')) showToast('Dispositivo excluído', '#ef4444')
+    else if (url.includes('deny')) showToast('Acesso negado', 'error')
+    else if (url.includes('delete')) showToast('Dispositivo excluído', 'error')
     load(true)
   }
 
@@ -3739,7 +3795,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
       showToast(isAdmin ? `${apelido} removido do grupo admin` : `${apelido} promovido a admin`)
     } catch {
       setAdminAp(adminApelidos) // reverte se der erro
-      showToast('Erro ao salvar', '#ef4444')
+      showToast('Erro ao salvar', 'error')
     }
     load(true)
   }
@@ -3765,7 +3821,6 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
 
   return (
     <div>
-      {toast && <Toast message={toast.msg} color={toast.color} onClose={() => setToast(null)} />}
       <div style={{ position: 'relative', marginBottom: 8 }}>
         <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: C.textMuted, pointerEvents: 'none' }} />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filtrar por apelido, navegador ou sistema…"
@@ -4185,7 +4240,7 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) 
 
   const [name, setName]   = useState('')
   const [saving, setSaving] = useState(false)
-  const [toast, setToast]   = useState('')
+  const showToast           = useToast()
 
   useEffect(() => {
     setName(cfg.customName || srv.name || '')
@@ -4200,9 +4255,9 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) 
         body: JSON.stringify({ name }),
       })
       await onUpdateEnv?.()
-      setToast('Salvo com sucesso!')
+      showToast('Salvo com sucesso!')
     } catch {
-      setToast('Erro ao salvar')
+      showToast('Erro ao salvar', 'error')
     } finally {
       setSaving(false)
     }
@@ -4210,7 +4265,6 @@ function EnvConfigPanel({ servers, envConfigs, onUpdateEnv, canRename = true }) 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      {toast && <Toast message={toast} onClose={() => setToast('')} />}
 
       {canRename && (
       <div>
@@ -4236,14 +4290,12 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
   const [newColor, setNewColor]   = useState(ENV_COLORS[0])
   const [newIcon, setNewIcon]     = useState('globe')
   const [saving, setSaving]       = useState(false)
-  const [toast, setToast]         = useState('')
   const [confirmDel, setConfirmDel] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editName, setEditName]   = useState('')
   const [editColor, setEditColor] = useState('')
   const [editIcon, setEditIcon]   = useState('globe')
-
-  const showToast = msg => setToast(msg)
+  const showToast                 = useToast()
 
   const genId = name => {
     const base = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 28)
@@ -4267,14 +4319,14 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
         setAdding(false); setNewName(''); setNewColor(ENV_COLORS[0]); setNewIcon('globe')
       } else {
         const e = await r.json()
-        showToast(e.error || 'Erro ao criar')
+        showToast(e.error || 'Erro ao criar', 'error')
       }
-    } catch { showToast('Erro de conexão') }
+    } catch { showToast('Erro de conexão', 'error') }
     finally { setSaving(false) }
   }
 
   const handleDelete = async id => {
-    if (list.length <= 1) { showToast('Precisa ter ao menos 1 ambiente'); return }
+    if (list.length <= 1) { showToast('Precisa ter ao menos 1 ambiente', 'warning'); return }
     setSaving(true)
     const updated = list.filter(s => s.id !== id)
     try {
@@ -4284,8 +4336,8 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
         body: JSON.stringify({ list: updated }),
       })
       if (r.ok) { await onUpdateEnv?.(); showToast('Ambiente removido') }
-      else showToast('Erro ao remover')
-    } catch { showToast('Erro de conexão') }
+      else showToast('Erro ao remover', 'error')
+    } catch { showToast('Erro de conexão', 'error') }
     finally { setSaving(false); setConfirmDel(null) }
   }
 
@@ -4302,15 +4354,13 @@ function MundosPanel({ servers, onUpdateEnv, meInfo }) {
         body: JSON.stringify({ list: updated }),
       })
       if (r.ok) { await onUpdateEnv?.(); showToast('Ambiente atualizado!'); setEditingId(null) }
-      else showToast('Erro ao salvar')
-    } catch { showToast('Erro de conexão') }
+      else showToast('Erro ao salvar', 'error')
+    } catch { showToast('Erro de conexão', 'error') }
     finally { setSaving(false) }
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {toast && <Toast message={toast} onClose={() => setToast('')} />}
-
       <div style={{ fontSize: 11, color: C.textMuted }}>
         Ambientes disponíveis. Os 4 padrões (Grimoria I–IV) aparecem enquanto nenhuma lista customizada for salva.
       </div>
@@ -4450,15 +4500,13 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
   const [adminList, setAdminList] = useState([])
   const [newApelido, setNewApelido] = useState('')
   const [saving, setSaving]         = useState(false)
-  const [toast, setToast]           = useState({ msg: '', ok: true })
+  const showToast                   = useToast()
 
   useEffect(() => {
     apiFetch('/api/admin/config').then(r => r.ok ? r.json() : {}).then(d => {
       if (d.adminApelidos) setAdminList(d.adminApelidos)
     }).catch(() => {})
   }, [])
-
-  const showToast = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast({ msg: '', ok: true }), 2500) }
 
   const handleSaveAdmins = async () => {
     setSaving(true)
@@ -4468,9 +4516,9 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apelidos: adminList }),
       })
-      r.ok ? showToast('Lista de admins atualizada!') : showToast('Erro ao salvar', false)
+      r.ok ? showToast('Lista de admins atualizada!') : showToast('Erro ao salvar', 'error')
       await onUpdateEnv?.()
-    } catch { showToast('Erro de conexão', false) }
+    } catch { showToast('Erro de conexão', 'error') }
     finally { setSaving(false) }
   }
 
@@ -4483,17 +4531,6 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-      {toast.msg && (
-        <div style={{
-          background: toast.ok ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-          border: `1px solid ${toast.ok ? '#10b98140' : '#ef444440'}`,
-          borderRadius: 8, padding: '8px 14px', fontSize: 12,
-          color: toast.ok ? C.teal : '#f87171',
-        }}>
-          {toast.msg}
-        </div>
-      )}
-
       <div style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: C.gold, display: 'flex', gap: 8, alignItems: 'center' }}>
         <Crown size={13} /> Logado como <strong>{meInfo?.apelido || '—'}</strong>
       </div>
@@ -5763,10 +5800,11 @@ function LoginScreen({ apelido, onLogin, justApproved }) {
   const [error, setError]           = useState('')
   const [loading, setLoading]       = useState(false)
   const [show, setShow]             = useState(false)
-  const [showToast, setShowToast]   = useState(justApproved)
   const inputRef = useRef(null)
+  const toast    = useToast()
 
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 80) }, [])
+  useEffect(() => { if (justApproved) toast('Dispositivo aprovado! Faça login para continuar.') }, [])
 
   const handleSubmit = async e => {
     e.preventDefault()
@@ -5792,14 +5830,6 @@ function LoginScreen({ apelido, onLogin, justApproved }) {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg }}>
       <BackgroundImage />
-      {showToast && (
-        <Toast
-          message="Dispositivo aprovado! Faça login para continuar."
-          color="#10b981"
-          icon={UserCheck}
-          onClose={() => setShowToast(false)}
-        />
-      )}
       <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 360, padding: '0 16px' }}>
         <div style={{
           background: C.card, border: `1px solid ${C.border}`, borderRadius: 16,
@@ -6213,4 +6243,6 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
   )
 }
 
-export default AuthGate
+export default function Root() {
+  return <ToastProvider><AuthGate /></ToastProvider>
+}
