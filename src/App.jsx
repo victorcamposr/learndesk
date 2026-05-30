@@ -4799,8 +4799,8 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
                     <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 6 }}>Observações anteriores</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {[...(tutor.obsHistorico || [])].reverse().map(h => (
-                        <div key={h.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                          <StickyNote size={11} color={C.textMuted} style={{ flexShrink: 0, marginTop: 2 }} />
+                        <div key={h.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <MessageSquareDot size={11} color={C.textMuted} style={{ flexShrink: 0 }} />
                           <div style={{ flex: 1 }}>
                             <div style={{ fontSize: 12, color: C.textSoft, lineHeight: 1.5 }}>{h.texto}</div>
                             <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>{formatDate(h.data)}</div>
