@@ -4,7 +4,7 @@ import helmet from 'helmet'
 import cookieParser from 'cookie-parser'
 import rateLimit from 'express-rate-limit'
 import bcrypt from 'bcryptjs'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { mkdirSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
@@ -17,10 +17,7 @@ const IS_PROD = !!(process.env.ALLOWED_ORIGINS || '').includes('github.io')
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, 'server-data')
-const FILE = join(DATA_DIR, 'analyses.json')
-
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
-if (!existsSync(FILE)) writeFileSync(FILE, '[]', 'utf8')
 
 const db = new Database(join(DATA_DIR, 'rubinot.db'))
 db.exec(`CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
@@ -153,68 +150,6 @@ const AUTH_COOKIE_OPTS = {
   sameSite: IS_PROD ? 'none' : 'lax',
 }
 
-function buildPrompt(tutores, cfg = {}) {
-  const diasParaAlerta = cfg.diasParaAlerta ?? 2
-  const baixaMax = cfg.baixaMax ?? 7
-  const moderadaMax = cfg.moderadaMax ?? 15
-  const today = new Date().toISOString().slice(0, 10)
-
-  const calcTempo = dataInicio => {
-    if (!dataInicio) return '—'
-    const inicio = new Date(dataInicio)
-    const hoje = new Date()
-    let meses = (hoje.getFullYear() - inicio.getFullYear()) * 12 + (hoje.getMonth() - inicio.getMonth())
-    let temp = new Date(inicio)
-    temp.setMonth(temp.getMonth() + meses)
-    let dias = Math.floor((hoje - temp) / 86400000)
-    if (dias < 0) { meses--; temp.setMonth(temp.getMonth() - 1); dias = Math.floor((hoje - temp) / 86400000) }
-    if (meses <= 0 && dias <= 0) return '< 1d'
-    if (meses <= 0) return `${dias}d`
-    if (dias === 0) return `${meses}m`
-    return `${meses}m ${dias}d`
-  }
-
-  const ativos = tutores.filter(t => t.cargo === 'Tutor' || t.cargo === 'Em Teste')
-  const ausentes = ativos.filter(t => (t.ausencias || []).some(a => a.dataFim >= today))
-  const atividadeCounts = { Alta: 0, Moderada: 0, Baixa: 0, 'Não Definida': 0 }
-  ativos.forEach(t => { if (t.atividade in atividadeCounts) atividadeCounts[t.atividade]++ })
-
-  const periodoCount = {}
-  ativos.forEach(t => {
-    const h = t.horarios || '?'
-    periodoCount[h] = (periodoCount[h] || 0) + 1
-  })
-
-  const tutoresFormatted = tutores.map(t => {
-    const ausenciasAtivas = (t.ausencias || []).filter(a => a.dataFim >= today)
-    const entry = {
-      nick: t.nick,
-      cargo: t.cargo,
-      atividade: t.atividade,
-      tempo: calcTempo(t.dataInicio),
-      turno: t.horarios || '?',
-    }
-    if (ausenciasAtivas.length > 0) entry.ausente = ausenciasAtivas[0].dataFim
-    if (t.nomeRL) entry.nomeRL = t.nomeRL
-    if (t.obs) entry.obs = t.obs
-    return entry
-  })
-
-  return `Gestor de tutores Rubinot (Tibia). Relatório CURTO e DIRETO, máx 400 palavras.
-
-REGRAS: Em Teste(máx 30d)→Tutor→Inativo/Desligado. Atividade/mês: 0=ND|1-${baixaMax}=Baixa|${baixaMax+1}-${moderadaMax}=Mod|${moderadaMax+1}+=Alta. Alertas: Tutor c/Baixa ou ND, ausência sem retorno, Em Teste>30d, sem presença>${diasParaAlerta}d. Turnos manhã/tarde/noite — 24/7 crítico.
-
-SNAPSHOT ${new Date().toLocaleDateString('pt-BR')}: Total:${tutores.length} Ativos:${ativos.length} Ausentes:${ausentes.length} | Alta:${atividadeCounts.Alta} Mod:${atividadeCounts.Moderada} Baixa:${atividadeCounts.Baixa} ND:${atividadeCounts['Não Definida']} | Turnos:${JSON.stringify(periodoCount)}
-
-TUTORES:${JSON.stringify(tutoresFormatted)}
-
-Use SOMENTE os dados acima. Produza exatamente 4 seções (2-4 linhas cada), sem repetir o snapshot:
-
-## ⚠️ ATENÇÃO IMEDIATA
-## 📊 COBERTURA DE TURNOS
-## 🔴 TOP 3 RISCOS
-## 👥 NECESSIDADES DA EQUIPE`
-}
 
 // ── Campos computados (atividade + elegibilidade) ─────────────────────────────
 function _calcAtividadeFromPresencas(presencas, dataInicio, baixaMax, moderadaMax, hoje) {
@@ -270,18 +205,6 @@ const serverKey = (req, key) => {
   const s = req.headers['x-server']
   return (s && getValidServers().includes(s)) ? `${key}:${s}` : key
 }
-const serverAnalysesFile = req => {
-  const s = req.headers['x-server']
-  return (s && getValidServers().includes(s))
-    ? join(DATA_DIR, `analyses-${s}.json`)
-    : FILE
-}
-const loadAnalysesFor = req => {
-  const f = serverAnalysesFile(req)
-  if (!existsSync(f)) return []
-  try { return JSON.parse(readFileSync(f, 'utf8')) } catch { return [] }
-}
-const saveAnalysesFor = (req, data) => writeFileSync(serverAnalysesFile(req), JSON.stringify(data, null, 2), 'utf8')
 
 const app = express()
 app.set('trust proxy', 1)
@@ -795,6 +718,11 @@ REGRAS (ordem de prioridade):
     const result = await model.generateContent(prompt)
     let text = result.response.text().trim()
     if (text.startsWith('```')) text = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
+    // modelos thinking podem incluir texto antes/depois do JSON
+    if (!text.startsWith('{')) {
+      const m = text.match(/\{[\s\S]*\}/)
+      if (m) text = m[0]
+    }
     const parsed = JSON.parse(text)
 
     // Server-side dedup: remove add_presenca e add_presenca_todos se data já existe
@@ -933,38 +861,6 @@ app.post('/api/config/apikey', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true })
 })
 
-app.get('/api/analyses', requireAuth, requireServerAccess, (req, res) => res.json(loadAnalysesFor(req)))
-
-app.post('/api/analyze', requireAuth, requireServerAccess, geminiLimiter, async (req, res) => {
-  const { tutores, cfg } = req.body || {}
-  if (!Array.isArray(tutores) || tutores.length > 500) return res.status(400).json({ error: 'Dados inválidos' })
-  const key = getKV('gemini_api_key') || process.env.GEMINI_API_KEY
-  if (!key) return res.status(400).json({ error: 'API key não configurada. Acesse as configurações e insira sua chave Gemini.' })
-
-  try {
-    const genAI = new GoogleGenerativeAI(key)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-    const result = await model.generateContent(buildPrompt(tutores, cfg))
-    const analysisText = result.response.text()
-
-    const analysis = {
-      id: Date.now(),
-      createdAt: new Date().toISOString(),
-      tutoresCount: tutores.length,
-      model: 'gemini-2.0-flash',
-      analysisText,
-    }
-
-    const all = loadAnalysesFor(req)
-    all.unshift(analysis)
-    if (all.length > 10) all.length = 10
-    saveAnalysesFor(req, all)
-
-    res.json(analysis)
-  } catch {
-    res.status(500).json({ error: 'Erro ao gerar análise.' })
-  }
-})
 
 // ── /api/auth/me ──────────────────────────────────────────────────────────────
 app.get('/api/auth/me', requireAuth, (req, res) => {

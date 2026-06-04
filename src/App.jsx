@@ -2458,124 +2458,6 @@ function SummaryCard({ label, value, sub, color, icon: Icon }) {
   )
 }
 
-// ── IAModal ───────────────────────────────────────────────────────────────────
-function IAModal({ open, onClose, tutores, apiKeyConfigured }) {
-  const [analyses, setAnalyses] = useState([])
-  const [current, setCurrent]   = useState(null)
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState('')
-
-  useEffect(() => {
-    if (!open) return
-    apiFetch('/api/analyses')
-      .then(r => r.json())
-      .then(data => { setAnalyses(data); if (data.length && !current) setCurrent(data[0]) })
-      .catch(() => {})
-  }, [open])
-
-  const handleAnalyze = async () => {
-    setLoading(true); setError('')
-    try {
-      const res = await apiFetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tutores, cfg: _cfg }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Erro desconhecido')
-      setAnalyses(prev => [data, ...prev.slice(0, 9)])
-      setCurrent(data)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const renderAnalysis = text => {
-    if (!text) return null
-    const parts = text.split(/(?=^## )/m).filter(p => p.trim())
-    return parts.map((part, i) => {
-      const lines = part.trim().split('\n')
-      if (!lines[0].startsWith('## '))
-        return <p key={i} style={{ fontSize: 13, color: C.text, lineHeight: 1.7, marginBottom: 12 }}>{lines.join('\n')}</p>
-      const title = lines[0].replace(/^##\s+\d+\.\s*/, '')
-      const body  = lines.slice(1).join('\n').trim()
-      return (
-        <div key={i} style={{ marginBottom: 22 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.07em', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 3, height: 12, background: `linear-gradient(180deg, ${C.gold}, ${C.primaryBright})`, borderRadius: 2, flexShrink: 0, display: 'inline-block' }} />
-            {title}
-          </div>
-          <div style={{ fontSize: 13, color: C.text, lineHeight: 1.75, whiteSpace: 'pre-wrap', paddingLeft: 10, borderLeft: `1px solid ${C.border}` }}>
-            {body}
-          </div>
-        </div>
-      )
-    })
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Análise com IA" icon={Sparkles} maxWidth={720}>
-      {!apiKeyConfigured && (
-        <div style={{ marginBottom: 14, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AtSign size={13} color='#f87171' />
-          <span style={{ fontSize: 12, color: '#f87171', flex: 1 }}>Chave Google Gemini não configurada — configure em <strong>Configurações → IA</strong></span>
-        </div>
-      )}
-
-      <button
-        style={{ ...btn('gold'), width: '100%', justifyContent: 'center', marginBottom: 14, opacity: loading ? 0.7 : 1, fontSize: 14, padding: '11px 0' }}
-        onClick={handleAnalyze} disabled={loading}
-      >
-        {loading ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
-        {loading ? 'Analisando equipe...' : 'Gerar nova análise'}
-      </button>
-
-      {error && (
-        <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 8, padding: '10px 14px', color: '#f87171', fontSize: 13, marginBottom: 14 }}>
-          {error}
-        </div>
-      )}
-
-      {analyses.length > 1 && (
-        <div style={{ display: 'flex', gap: 5, marginBottom: 14, overflowX: 'auto', paddingBottom: 4, alignItems: 'center' }}>
-          <History size={12} color={C.textMuted} style={{ flexShrink: 0 }} />
-          {analyses.map((a, i) => (
-            <button key={a.id} onClick={() => setCurrent(a)} style={{
-              ...btn(current?.id === a.id ? 'primary' : 'ghost', 'sm'),
-              whiteSpace: 'nowrap', flexShrink: 0,
-            }}>
-              {i === 0 ? 'Mais recente' : new Date(a.createdAt).toLocaleDateString('pt-BR')}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {!analyses.length && !loading && (
-        <div style={{ textAlign: 'center', color: C.textMuted, padding: '40px 0' }}>
-          <Sparkles size={32} style={{ margin: '0 auto 12px', display: 'block', opacity: .15 }} />
-          <div style={{ fontSize: 14 }}>Nenhuma análise ainda</div>
-          <div style={{ fontSize: 12, marginTop: 4, opacity: .5 }}>Configure sua chave e clique em Gerar</div>
-        </div>
-      )}
-
-      {current && (
-        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
-          <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <span>{new Date(current.createdAt).toLocaleString('pt-BR')}</span>
-            <span>·</span>
-            <span>{current.tutoresCount} tutores</span>
-            <span>·</span>
-            <span>{current.model}</span>
-          </div>
-          {renderAnalysis(current.analysisText)}
-        </div>
-      )}
-    </Modal>
-  )
-}
-
 // ── PagamentoEmailModal ───────────────────────────────────────────────────────
 function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meInfo }) {
   const hoje = new Date()
@@ -4168,52 +4050,70 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
        tab === 'mundos'    ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> :
        tab === 'auditoria' ? <AuditoriaPanel /> :
        tab === 'ia' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-            <Sparkles size={14} color={C.primaryBright} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Integração Google Gemini</span>
-            <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: C.gold, background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '2px 8px', letterSpacing: '.06em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Shield size={10} /> Somente Administrador
-            </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {/* Header com badge admin */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: `linear-gradient(135deg, ${C.primary}30, ${C.primaryBright}20)`, border: `1px solid ${C.primaryBright}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Sparkles size={15} color={C.primaryBright} />
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Integração Google Gemini</div>
+              <div style={{ fontSize: 11, color: C.textMuted }}>Chave de API para o assistente de IA</div>
+            </div>
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, color: C.gold, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 6, padding: '3px 9px', letterSpacing: '.05em', textTransform: 'uppercase', flexShrink: 0 }}>
+              <Shield size={10} /> Admin only
+            </div>
           </div>
 
-          <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <AtSign size={13} color={C.textMuted} />
-              <span style={{ fontSize: 12, color: apiKeyConfigured ? '#34d399' : C.textSoft, flex: 1 }}>
-                {apiKeyConfigured ? 'Chave Google Gemini configurada' : 'Chave Google Gemini não configurada'}
-              </span>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: apiKeyConfigured ? '#34d399' : '#f87171', boxShadow: `0 0 6px ${apiKeyConfigured ? '#34d39960' : '#f8717160'}`, flexShrink: 0 }} />
+          {/* Status card */}
+          <div style={{ background: apiKeyConfigured ? 'rgba(52,211,153,0.06)' : 'rgba(248,113,113,0.06)', border: `1px solid ${apiKeyConfigured ? 'rgba(52,211,153,0.2)' : 'rgba(248,113,113,0.2)'}`, borderRadius: 10, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: apiKeyConfigured ? '#34d399' : '#f87171', boxShadow: `0 0 8px ${apiKeyConfigured ? '#34d39960' : '#f8717160'}`, flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: apiKeyConfigured ? '#34d399' : '#f87171' }}>
+                {apiKeyConfigured ? 'Chave configurada' : 'Chave não configurada'}
+              </div>
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
+                {apiKeyConfigured ? 'O assistente de IA está ativo e pronto para uso' : 'Configure a chave abaixo para ativar o assistente'}
+              </div>
             </div>
+          </div>
 
+          {/* Input da chave */}
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '16px' }}>
+            <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Key size={11} color={C.gold} /> Chave da API Google Gemini
+            </label>
             <div style={{ position: 'relative' }}>
               <input
-                style={{ ...inputBase, fontSize: 12, fontFamily: 'monospace', paddingRight: 40 }}
+                style={{ ...inputBase, fontSize: 12, fontFamily: 'monospace', paddingRight: 44, letterSpacing: apiKey ? 0 : (apiKeyConfigured ? 2 : 0) }}
                 type={showApiKey ? 'text' : 'password'}
-                placeholder={apiKeyConfigured ? 'Nova chave (deixe vazio para manter)' : 'AIzaSy...'}
+                placeholder={apiKeyConfigured ? '••••••••••••••••••••••••••••••••••••••' : 'AIzaSy...'}
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
               />
               <button
                 onClick={() => setShowApiKey(v => !v)}
-                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2 }}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 4, borderRadius: 4, transition: 'color .15s' }}
+                title={showApiKey ? 'Ocultar' : 'Mostrar'}
               >
-                {showApiKey ? <EyeOff size={13} /> : <Eye size={13} />}
+                {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
-
-            <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
-              Obtenha sua chave em <span style={{ color: C.primaryBright, fontFamily: 'monospace' }}>aistudio.google.com</span>. A chave é armazenada no banco de dados do servidor.
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 8, lineHeight: 1.5 }}>
+              {apiKeyConfigured
+                ? 'Digite uma nova chave para substituir a atual. Deixe vazio para manter.'
+                : <>Obtenha sua chave em <span style={{ color: C.primaryBright, fontFamily: 'monospace' }}>aistudio.google.com</span></>
+              }
             </div>
-
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
               <button
-                style={{ ...btn('primary'), opacity: apiKey.trim() ? 1 : 0.45 }}
+                style={{ ...btn('gold'), opacity: apiKey.trim() ? 1 : 0.4, transition: 'opacity .15s' }}
                 disabled={!apiKey.trim()}
                 onClick={() => {
                   onSaveApiKey(apiKey.trim())
                   setApiKey('')
-                  showToastSettings('Chave Gemini salva com sucesso', 'success')
+                  showToastSettings('Chave Gemini salva com sucesso')
                 }}
               >
                 <Save size={13} /> Salvar chave
