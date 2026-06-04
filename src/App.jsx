@@ -2459,9 +2459,7 @@ function SummaryCard({ label, value, sub, color, icon: Icon }) {
 }
 
 // ── IAModal ───────────────────────────────────────────────────────────────────
-function IAModal({ open, onClose, tutores, apiKeyConfigured, onSaveApiKey }) {
-  const [newKey, setNewKey] = useState('')
-  const [showKey, setShowKey]   = useState(false)
+function IAModal({ open, onClose, tutores, apiKeyConfigured }) {
   const [analyses, setAnalyses] = useState([])
   const [current, setCurrent]   = useState(null)
   const [loading, setLoading]   = useState(false)
@@ -2478,7 +2476,6 @@ function IAModal({ open, onClose, tutores, apiKeyConfigured, onSaveApiKey }) {
   const handleAnalyze = async () => {
     setLoading(true); setError('')
     try {
-      if (newKey.trim()) onSaveApiKey(newKey.trim())
       const res = await apiFetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2520,24 +2517,12 @@ function IAModal({ open, onClose, tutores, apiKeyConfigured, onSaveApiKey }) {
 
   return (
     <Modal open={open} onClose={onClose} title="Análise com IA" icon={Sparkles} maxWidth={720}>
-      <div style={{ marginBottom: 14, background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 14px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AtSign size={13} color={C.textMuted} />
-          <span style={{ fontSize: 12, color: (apiKeyConfigured || newKey) ? '#34d399' : C.textSoft, flex: 1 }}>
-            {(apiKeyConfigured || newKey) ? 'Chave Google Gemini configurada' : 'Chave Google Gemini não configurada'}
-          </span>
-          <button style={btn('ghost', 'sm')} onClick={() => setShowKey(v => !v)}>
-            {showKey ? <EyeOff size={12} /> : <Eye size={12} />}
-            {showKey ? 'Ocultar' : 'Configurar'}
-          </button>
+      {!apiKeyConfigured && (
+        <div style={{ marginBottom: 14, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AtSign size={13} color='#f87171' />
+          <span style={{ fontSize: 12, color: '#f87171', flex: 1 }}>Chave Google Gemini não configurada — configure em <strong>Configurações → IA</strong></span>
         </div>
-        {showKey && (
-          <input style={{ ...inputBase, marginTop: 10, fontSize: 12, fontFamily: 'monospace' }}
-            type="password" placeholder={apiKeyConfigured ? 'Nova chave (deixe vazio para manter)' : 'AIzaSy...'}
-            value={newKey}
-            onChange={e => setNewKey(e.target.value)} autoFocus />
-        )}
-      </div>
+      )}
 
       <button
         style={{ ...btn('gold'), width: '100%', justifyContent: 'center', marginBottom: 14, opacity: loading ? 0.7 : 1, fontSize: 14, padding: '11px 0' }}
@@ -3272,7 +3257,7 @@ function PresencaHistoricoChart({ tutores, presencaApenasEmTeste }) {
 }
 
 // ── DashboardTab ──────────────────────────────────────────────────────────────
-function DashboardTab({ tutores, apiKeyConfigured, onSaveApiKey, servers, envConfigs, cfg, meInfo }) {
+function DashboardTab({ tutores, servers, envConfigs, cfg, meInfo }) {
   const [sortAsc, setSortAsc] = useState(false)
   const [pagamentoOpen, setPagamentoOpen] = useState(false)
 
@@ -4110,10 +4095,13 @@ function AuditoriaPanel() {
 }
 
 // ── SettingsModal ─────────────────────────────────────────────────────────────
-function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, envConfigs, meInfo, onUpdateEnv }) {
-  const [form, setForm] = useState({ ...DEFAULT_CFG })
-  const [tab, setTab]   = useState('config')
-  useEffect(() => { if (open) { setForm({ ..._cfg }); setTab(initialTab) } }, [open, initialTab])
+function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, envConfigs, meInfo, onUpdateEnv, apiKeyConfigured, onSaveApiKey }) {
+  const [form, setForm]         = useState({ ...DEFAULT_CFG })
+  const [tab, setTab]           = useState('config')
+  const [apiKey, setApiKey]     = useState('')
+  const [showApiKey, setShowApiKey] = useState(false)
+  const showToastSettings       = useToast()
+  useEffect(() => { if (open) { setForm({ ..._cfg }); setTab(initialTab); setApiKey(''); setShowApiKey(false) } }, [open, initialTab])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: Number(v) }))
   const setBool = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -4152,6 +4140,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
           { key: 'mundos',     label: 'Mundos',        icon: Swords },
           { key: 'devices',    label: 'Dispositivos',  icon: Monitor },
           { key: 'auditoria',  label: 'Auditoria',     icon: ClipboardList },
+          { key: 'ia',         label: 'IA',            icon: Sparkles },
         ] : [
           { key: 'config', label: 'Regras',  icon: BookOpen },
           { key: 'mundos', label: 'Mundos',  icon: Swords },
@@ -4177,7 +4166,62 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
 
       {tab === 'devices'   ? <DevicesPanel servers={servers} meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> :
        tab === 'mundos'    ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> :
-       tab === 'auditoria' ? <AuditoriaPanel /> : (
+       tab === 'auditoria' ? <AuditoriaPanel /> :
+       tab === 'ia' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+            <Sparkles size={14} color={C.primaryBright} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Integração Google Gemini</span>
+            <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: C.gold, background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '2px 8px', letterSpacing: '.06em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Shield size={10} /> Somente Administrador
+            </span>
+          </div>
+
+          <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AtSign size={13} color={C.textMuted} />
+              <span style={{ fontSize: 12, color: apiKeyConfigured ? '#34d399' : C.textSoft, flex: 1 }}>
+                {apiKeyConfigured ? 'Chave Google Gemini configurada' : 'Chave Google Gemini não configurada'}
+              </span>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: apiKeyConfigured ? '#34d399' : '#f87171', boxShadow: `0 0 6px ${apiKeyConfigured ? '#34d39960' : '#f8717160'}`, flexShrink: 0 }} />
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <input
+                style={{ ...inputBase, fontSize: 12, fontFamily: 'monospace', paddingRight: 40 }}
+                type={showApiKey ? 'text' : 'password'}
+                placeholder={apiKeyConfigured ? 'Nova chave (deixe vazio para manter)' : 'AIzaSy...'}
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+              />
+              <button
+                onClick={() => setShowApiKey(v => !v)}
+                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 2 }}
+              >
+                {showApiKey ? <EyeOff size={13} /> : <Eye size={13} />}
+              </button>
+            </div>
+
+            <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
+              Obtenha sua chave em <span style={{ color: C.primaryBright, fontFamily: 'monospace' }}>aistudio.google.com</span>. A chave é armazenada no banco de dados do servidor.
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                style={{ ...btn('primary'), opacity: apiKey.trim() ? 1 : 0.45 }}
+                disabled={!apiKey.trim()}
+                onClick={() => {
+                  onSaveApiKey(apiKey.trim())
+                  setApiKey('')
+                  showToastSettings('Chave Gemini salva com sucesso', 'success')
+                }}
+              >
+                <Save size={13} /> Salvar chave
+              </button>
+            </div>
+          </div>
+        </div>
+       ) : (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
         {/* Toggle atividade automática */}
@@ -6248,7 +6292,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
           ) : (
             <>
               {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} cfg={cfg} pendingAuditRef={pendingAuditRef} />}
-              {tab === 'dashboard' && <DashboardTab tutores={tutores} apiKeyConfigured={apiKeyConfigured} onSaveApiKey={handleSaveApiKey} servers={serversProp} envConfigs={envConfigs} cfg={cfg} meInfo={meInfo} />}
+              {tab === 'dashboard' && <DashboardTab tutores={tutores} servers={serversProp} envConfigs={envConfigs} cfg={cfg} meInfo={meInfo} />}
             </>
           )}
         </main>
@@ -6262,6 +6306,8 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
         envConfigs={envConfigs || {}}
         meInfo={meInfo || { apelido: '', isAdmin: false }}
         onUpdateEnv={onUpdateEnv}
+        apiKeyConfigured={apiKeyConfigured}
+        onSaveApiKey={handleSaveApiKey}
       />
       {meInfo?.isAdmin && pendingDevices > 0 && (
         <button
