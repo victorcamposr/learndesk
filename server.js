@@ -8,7 +8,6 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import Database from 'better-sqlite3'
 import 'dotenv/config'
 
@@ -713,12 +712,16 @@ REGRAS (ordem de prioridade):
 9. PRESENÇA RESTRITA: apenas tutores "Em Teste" têm presença contabilizada. NÃO adicione presença para outros cargos (Tutor, Sênior, Inativo). Se solicitado, informe que o tutor não está no período de teste.` : ''}`
 
   try {
-    const genAI = new GoogleGenerativeAI(key)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-    const result = await model.generateContent(prompt)
-    let text = result.response.text().trim()
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }
+    )
+    const geminiData = await geminiRes.json()
+    if (!geminiRes.ok) throw new Error(geminiData?.error?.message || 'Gemini API error')
+    // extrai o primeiro texto — ignora partes com thoughtSignature (thinking)
+    const parts = geminiData?.candidates?.[0]?.content?.parts || []
+    let text = (parts.find(p => p.text && !p.thoughtSignature)?.text || parts[0]?.text || '').trim()
     if (text.startsWith('```')) text = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
-    // modelos thinking podem incluir texto antes/depois do JSON
     if (!text.startsWith('{')) {
       const m = text.match(/\{[\s\S]*\}/)
       if (m) text = m[0]
