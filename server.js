@@ -837,7 +837,8 @@ REGRAS (ordem de prioridade):
     }
 
     res.json(parsed)
-  } catch {
+  } catch (err) {
+    console.error('[IA-CHAT] erro:', err?.message || err)
     res.status(500).json({ error: 'Erro ao processar resposta da IA.' })
   }
 })
