@@ -4110,10 +4110,14 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
               <button
                 style={{ ...btn('gold'), opacity: apiKey.trim() ? 1 : 0.4, transition: 'opacity .15s' }}
                 disabled={!apiKey.trim()}
-                onClick={() => {
-                  onSaveApiKey(apiKey.trim())
-                  setApiKey('')
-                  showToastSettings('Chave Gemini salva com sucesso')
+                onClick={async () => {
+                  try {
+                    await onSaveApiKey(apiKey.trim())
+                    setApiKey('')
+                    showToastSettings('Chave Gemini salva com sucesso')
+                  } catch (e) {
+                    showToastSettings(e.message || 'Erro ao salvar chave', 'error')
+                  }
                 }}
               >
                 <Save size={13} /> Salvar chave
@@ -6123,9 +6127,13 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     setSettingsOpen(false)
   }
 
-  const handleSaveApiKey = key => {
+  const handleSaveApiKey = async key => {
+    const res = await apiFetch('/api/config/apikey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key }) })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || `Erro ${res.status}`)
+    }
     setApiKeyConfigured(true)
-    apiFetch('/api/config/apikey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key }) })
   }
 
   // Carrega do servidor (SQLite via API)
