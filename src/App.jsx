@@ -671,6 +671,7 @@ function AtividadeTooltip({ active, payload, label }) {
 
 // ── Modal wrapper ─────────────────────────────────────────────────────────────
 function Modal({ open, onClose, title, icon: Icon, children, maxWidth = 640, headerRight, accentColor }) {
+  const backdropMouseDown = useRef(false)
   useEffect(() => {
     if (!open) return
     const esc = e => { if (e.key === 'Escape') onClose() }
@@ -685,7 +686,8 @@ function Modal({ open, onClose, title, icon: Icon, children, maxWidth = 640, hea
   if (!open) return null
   return (
     <div
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      onMouseDown={e => { backdropMouseDown.current = e.target === e.currentTarget }}
+      onClick={e => { if (backdropMouseDown.current && e.target === e.currentTarget) onClose() }}
       style={{
         position: 'fixed', inset: 0, zIndex: 500,
         background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)',

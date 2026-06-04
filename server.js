@@ -835,7 +835,12 @@ REGRAS (ordem de prioridade):
     res.json(parsed)
   } catch (err) {
     console.error('[IA-CHAT] erro:', err?.message || err)
-    res.status(500).json({ error: 'Erro ao processar resposta da IA.' })
+    const msg = err?.message || ''
+    const isKeyErr = /api.?key|invalid|permission|forbidden|unauthorized|403|400/i.test(msg) || err?.status === 403 || err?.status === 400
+    const clientMsg = isKeyErr
+      ? 'Chave da API inválida ou sem permissão. Verifique a chave Gemini nas configurações.'
+      : `Erro ao processar resposta da IA.${msg ? ` (${msg})` : ''}`
+    res.status(500).json({ error: clientMsg })
   }
 })
 
@@ -855,8 +860,8 @@ app.get('/api/config/apikey', requireAuth, (_req, res) => res.json({ configured:
 
 app.post('/api/config/apikey', requireAuth, requireAdmin, (req, res) => {
   const { apiKey } = req.body || {}
-  if (typeof apiKey !== 'string' || apiKey.length > 256) return res.status(400).json({ error: 'Dados inválidos' })
-  setKV('gemini_api_key', apiKey)
+  if (typeof apiKey !== 'string' || !apiKey.trim() || apiKey.length > 256) return res.status(400).json({ error: 'Dados inválidos' })
+  setKV('gemini_api_key', apiKey.trim())
   addAuditLog(getDeviceApelido(req) || 'admin', 'apikey_update', {})
   res.json({ ok: true })
 })
