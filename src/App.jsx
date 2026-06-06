@@ -830,7 +830,7 @@ function ObsModal({ tutor, open, onClose, onSave }) {
 // ── DesligamentoModal ─────────────────────────────────────────────────────────
 const DESLIGAMENTO_MOTIVOS = [
   { key: 'solicitou_desligamento', label: 'Solicitou desligamento', hasDetails: true },
-  { key: 'solicitou_transferencia', label: 'Solicitou transferência', hasDetails: false },
+  { key: 'solicitou_transferencia', label: 'Solicitou transferência', hasDetails: true },
   { key: 'inatividade', label: 'Inatividade', hasDetails: false },
   { key: 'ma_conduta', label: 'Má conduta', hasDetails: true },
 ]
@@ -855,6 +855,7 @@ function DesligamentoModal({ tutor, open, onClose, onConfirm }) {
       const pad = n => String(n).padStart(2, '0')
       const date45 = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
       obsText = `Solicitou transferência em ${formatDate(today)}.\n\nPoderá solicitar nova transferência somente após ${formatDate(date45)}.`
+      if (detalhes.trim()) obsText += `\n\n${detalhes.trim()}`
     } else if (motivo === 'inatividade') {
       obsText = 'Desligado por inatividade.'
     } else if (motivo === 'ma_conduta') {
@@ -1269,7 +1270,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
   const emAusencia      = ausenciasAtivas.length > 0
   const hasObs          = !!tutor.obs
   const isDesligado     = tutor.cargo === 'Desligado'
-  const obsDesligamento = isDesligado && !!tutor.obsIsDesligamento
+  const obsDesligamento = isDesligado && hasObs
   const diasAlerta      = isDesligado || !_cfg.atividadeAutomatica ? null : diasSemPresenca(tutor)
   const atividadeColor  = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
   const accentColor     = isDesligado ? (CARGO_COLORS['Desligado']) : diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
@@ -3847,6 +3848,7 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
     else if (url.includes('deny')) showToast('Acesso negado', 'error')
     else if (url.includes('delete')) showToast('Dispositivo excluído', 'error')
     load(true)
+    window.dispatchEvent(new Event('rubinot:devices-changed'))
   }
 
   const toggleAdmin = async (apelido, isAdmin) => {
@@ -4861,7 +4863,7 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
 
         {/* Obs */}
         {tutor.obs && (() => {
-          const isObsDeslig = tutor.obsIsDesligamento && tutor.cargo === 'Desligado'
+          const isObsDeslig = tutor.cargo === 'Desligado' && !!tutor.obs
           const obsColor = isObsDeslig ? '#ef4444' : C.gold
           return (
             <div style={{ background: `${obsColor}0a`, border: `1px solid ${obsColor}25`, borderRadius: 10, padding: '10px 14px' }}>
@@ -4982,7 +4984,8 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
     }
     check()
     const id = setInterval(check, 12000)
-    return () => clearInterval(id)
+    window.addEventListener('rubinot:devices-changed', check)
+    return () => { clearInterval(id); window.removeEventListener('rubinot:devices-changed', check) }
   }, [])
 
   useEffect(() => {
