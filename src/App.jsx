@@ -1269,6 +1269,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
   const emAusencia      = ausenciasAtivas.length > 0
   const hasObs          = !!tutor.obs
   const isDesligado     = tutor.cargo === 'Desligado'
+  const obsDesligamento = isDesligado && !!tutor.obsIsDesligamento
   const diasAlerta      = isDesligado || !_cfg.atividadeAutomatica ? null : diasSemPresenca(tutor)
   const atividadeColor  = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
   const accentColor     = isDesligado ? (CARGO_COLORS['Desligado']) : diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
@@ -1432,25 +1433,28 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
         </div>
 
         {/* Obs badge (sem texto, só ícone) */}
-        {hasObs && (
-          <HoverTooltip width={300} side="top" content={
-            <div>
-              <div style={{ fontSize: 11, color: C.gold, fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
-                <StickyNote size={11} /> Observação
+        {hasObs && (() => {
+          const obsColor = obsDesligamento ? '#ef4444' : C.gold
+          return (
+            <HoverTooltip width={300} side="top" content={
+              <div>
+                <div style={{ fontSize: 11, color: obsColor, fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <StickyNote size={11} /> {obsDesligamento ? 'Motivo do desligamento' : 'Observação'}
+                </div>
+                <div style={{ fontSize: 13, color: C.text, lineHeight: 1.55 }}>{tutor.obs}</div>
               </div>
-              <div style={{ fontSize: 13, color: C.text, lineHeight: 1.55 }}>{tutor.obs}</div>
-            </div>
-          }>
-            <div style={{
-              background: `${C.gold}0c`, border: `1px solid ${C.gold}25`,
-              borderRadius: 7, padding: '5px 11px', marginBottom: 10,
-              display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'default',
-            }}>
-              <MessageSquareDot size={12} color={C.gold} />
-              <span style={{ fontSize: 11, color: C.gold, fontWeight: 600 }}>Observação</span>
-            </div>
-          </HoverTooltip>
-        )}
+            }>
+              <div style={{
+                background: `${obsColor}0c`, border: `1px solid ${obsColor}25`,
+                borderRadius: 7, padding: '5px 11px', marginBottom: 10,
+                display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'default',
+              }}>
+                <MessageSquareDot size={12} color={obsColor} />
+                <span style={{ fontSize: 11, color: obsColor, fontWeight: 600 }}>{obsDesligamento ? 'Desligamento' : 'Observação'}</span>
+              </div>
+            </HoverTooltip>
+          )
+        })()}
 
         </div>{/* fim área clicável */}
 
@@ -1462,9 +1466,9 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
           <HoverTooltip content={<span style={{ fontSize: 12, color: C.text }}>{hasObs ? 'Editar observação' : 'Adicionar observação'}</span>} width={160}>
             <button style={{
               ...btn('subtle', 'sm'), marginRight: 'auto',
-              color: hasObs ? C.gold : C.textMuted,
-              borderColor: hasObs ? `${C.gold}35` : C.border,
-              background: hasObs ? `${C.gold}0c` : 'transparent',
+              color: hasObs ? (obsDesligamento ? '#ef4444' : C.gold) : C.textMuted,
+              borderColor: hasObs ? (obsDesligamento ? '#ef444435' : `${C.gold}35`) : C.border,
+              background: hasObs ? (obsDesligamento ? 'rgba(239,68,68,0.07)' : `${C.gold}0c`) : 'transparent',
             }} onClick={() => onOpenObs(tutor.id)}>
               {hasObs ? <MessageSquareDot size={13} /> : <MessageSquare size={13} />}
               <span style={{ fontSize: 11 }}>Obs.</span>
@@ -4856,14 +4860,18 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
         </div>
 
         {/* Obs */}
-        {tutor.obs && (
-          <div style={{ background: `${C.gold}0a`, border: `1px solid ${C.gold}25`, borderRadius: 10, padding: '10px 14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: C.gold, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
-              <StickyNote size={11} /> Observação atual
+        {tutor.obs && (() => {
+          const isObsDeslig = tutor.obsIsDesligamento && tutor.cargo === 'Desligado'
+          const obsColor = isObsDeslig ? '#ef4444' : C.gold
+          return (
+            <div style={{ background: `${obsColor}0a`, border: `1px solid ${obsColor}25`, borderRadius: 10, padding: '10px 14px' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: obsColor, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <StickyNote size={11} /> {isObsDeslig ? 'Motivo do desligamento' : 'Observação atual'}
+              </div>
+              <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, whiteSpace: 'pre-line' }}>{tutor.obs}</div>
             </div>
-            <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6 }}>{tutor.obs}</div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Histórico — colapsável */}
         {((tutor.obsHistorico?.length > 0) || (tutor.ausenciaHistorico?.length > 0)) && (
