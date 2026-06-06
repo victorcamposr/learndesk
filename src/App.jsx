@@ -827,6 +827,104 @@ function ObsModal({ tutor, open, onClose, onSave }) {
   )
 }
 
+// ── DesligamentoModal ─────────────────────────────────────────────────────────
+const DESLIGAMENTO_MOTIVOS = [
+  { key: 'solicitou_desligamento', label: 'Solicitou desligamento', hasDetails: true },
+  { key: 'solicitou_transferencia', label: 'Solicitou transferência', hasDetails: false },
+  { key: 'inatividade', label: 'Inatividade', hasDetails: false },
+  { key: 'ma_conduta', label: 'Má conduta', hasDetails: true },
+]
+
+function DesligamentoModal({ tutor, open, onClose, onConfirm }) {
+  const [motivo, setMotivo]   = useState(null)
+  const [detalhes, setDetalhes] = useState('')
+  useEffect(() => { if (open) { setMotivo(null); setDetalhes('') } }, [open])
+
+  const selected = DESLIGAMENTO_MOTIVOS.find(m => m.key === motivo)
+
+  const handleConfirm = () => {
+    if (!motivo) return
+    const today = todayStr()
+    let obsText = ''
+    if (motivo === 'solicitou_desligamento') {
+      obsText = 'Solicitou desligamento.'
+      if (detalhes.trim()) obsText += `\n\n${detalhes.trim()}`
+    } else if (motivo === 'solicitou_transferencia') {
+      const [y, mo, d] = today.split('-').map(Number)
+      const dt = new Date(y, mo - 1, d + 45)
+      const pad = n => String(n).padStart(2, '0')
+      const date45 = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+      obsText = `Solicitou transferência em ${formatDate(today)}.\n\nPoderá solicitar nova transferência somente após ${formatDate(date45)}.`
+    } else if (motivo === 'inatividade') {
+      obsText = 'Desligado por inatividade.'
+    } else if (motivo === 'ma_conduta') {
+      obsText = 'Desligado por má conduta.'
+      if (detalhes.trim()) obsText += `\n\n${detalhes.trim()}`
+    }
+    onConfirm(obsText)
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Motivo do desligamento — ${tutor?.nick}`} icon={UserX} maxWidth={480} accentColor="#ef4444">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontSize: 13, color: C.textSoft, marginBottom: 2 }}>Selecione o motivo do desligamento:</div>
+
+        {DESLIGAMENTO_MOTIVOS.map(m => (
+          <button key={m.key} type="button" onClick={() => { setMotivo(m.key); setDetalhes('') }} style={{
+            background: motivo === m.key ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.02)',
+            border: `1px solid ${motivo === m.key ? '#ef4444' : C.border}`,
+            borderRadius: 10, padding: '11px 16px',
+            color: motivo === m.key ? '#f87171' : C.text,
+            cursor: 'pointer', textAlign: 'left', fontSize: 14,
+            fontWeight: motivo === m.key ? 600 : 400,
+            display: 'flex', alignItems: 'center', gap: 10,
+            transition: 'all .15s', fontFamily: "'Space Grotesk', 'Inter', sans-serif",
+          }}>
+            <div style={{
+              width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+              border: `2px solid ${motivo === m.key ? '#ef4444' : C.textMuted}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: motivo === m.key ? '#ef4444' : 'transparent',
+            }}>
+              {motivo === m.key && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />}
+            </div>
+            {m.label}
+          </button>
+        ))}
+
+        {selected?.hasDetails && (
+          <div style={{ marginTop: 4 }}>
+            <label style={labelStyle}>Mais informações</label>
+            <textarea
+              autoFocus
+              style={{ ...inputBase, minHeight: 80, resize: 'vertical', fontSize: 13 }}
+              value={detalhes}
+              onChange={e => setDetalhes(e.target.value)}
+              placeholder="Descreva mais detalhes..."
+            />
+          </div>
+        )}
+
+        {motivo === 'solicitou_transferencia' && (
+          <div style={{
+            background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)',
+            borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#fca5a5', lineHeight: 1.6,
+          }}>
+            Será registrado automaticamente: poderá solicitar nova transferência somente <strong>após 45 dias</strong>.
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
+          <button style={btn('ghost')} onClick={onClose}><X size={14} /> Cancelar</button>
+          <button style={{ ...btn('danger'), opacity: motivo ? 1 : 0.45 }} onClick={handleConfirm} disabled={!motivo}>
+            <UserX size={14} /> Confirmar desligamento
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ── AusenciaModal ─────────────────────────────────────────────────────────────
 function AusenciaModal({ tutor, open, onClose, onSave }) {
   const [motivo, setMotivo]           = useState('')
@@ -959,15 +1057,17 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
 const BLANK = {
   nick: '', nomeRL: '', celular: '', discord: '', cargo: 'Em Teste',
   atividade: 'Não Definida', dataInicio: '', horariosSemana: [], horariosFDS: [],
-  detalheHorario: '', obs: '', ausencias: [], dataEfetivacao: '', presencas: [],
+  detalheHorario: '', obs: '', obsIsDesligamento: false, ausencias: [], dataEfetivacao: '', presencas: [],
   obsHistorico: [], ausenciaHistorico: [],
 }
 const PERIODO_ICONS = { Manhã: Sun, Tarde: Sunset, Noite: Moon }
 
 function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
   const isEdit = editId !== null
-  const [form, setForm]     = useState(BLANK)
-  const [errors, setErrors] = useState({})
+  const [form, setForm]               = useState(BLANK)
+  const [errors, setErrors]           = useState({})
+  const [desligamentoOpen, setDesligamentoOpen] = useState(false)
+  const pendingSaveRef                = useRef(null)
 
   useEffect(() => {
     if (isEdit) {
@@ -995,6 +1095,14 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
     if (form.dataInicio && form.dataInicio > todayStr()) e.dataInicio = 'Data de início não pode ser futura'
     if (Object.keys(e).length) { setErrors(e); return }
     const horariosStr = serializeHorarios(form.horariosSemana, form.horariosFDS)
+    if (isEdit && form.cargo === 'Desligado') {
+      const originalTutor = tutores.find(x => x.id === editId)
+      if (originalTutor?.cargo !== 'Desligado') {
+        pendingSaveRef.current = horariosStr
+        setDesligamentoOpen(true)
+        return
+      }
+    }
     if (isEdit) {
       if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_edit', nick: form.nick }
       setTutores(prev => prev.map(t => t.id === editId ? { ...form, id: editId, horarios: horariosStr, atividadeCalculada: null, apto: null } : t))
@@ -1005,9 +1113,25 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
     onDone()
   }
 
+  const handleDesligamentoConfirm = (obsText) => {
+    const horariosStr = pendingSaveRef.current
+    if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_edit', nick: form.nick }
+    setTutores(prev => prev.map(t => {
+      if (t.id !== editId) return t
+      const oldObs = (t.obs || '').trim()
+      const newHistorico = oldObs
+        ? [...(t.obsHistorico || []), { id: Date.now(), texto: oldObs, data: todayStr() }]
+        : (t.obsHistorico || [])
+      return { ...form, id: editId, horarios: horariosStr, atividadeCalculada: null, apto: null, obs: obsText, obsIsDesligamento: true, obsHistorico: newHistorico }
+    }))
+    setDesligamentoOpen(false)
+    onDone()
+  }
+
   const inp = field => ({ ...inputBase, borderColor: errors[field] ? '#ef4444' : C.border })
 
   return (
+    <>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <label style={labelStyle}><Shield size={12} /> Nick *</label>
@@ -1101,6 +1225,13 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
         <button style={btn('gold', 'lg')} onClick={handleSave}><Save size={15} /> {isEdit ? 'Salvar Alterações' : 'Cadastrar Tutor'}</button>
       </div>
     </div>
+    <DesligamentoModal
+      tutor={isEdit ? tutores.find(x => x.id === editId) : null}
+      open={desligamentoOpen}
+      onClose={() => { setDesligamentoOpen(false); pendingSaveRef.current = null }}
+      onConfirm={handleDesligamentoConfirm}
+    />
+    </>
   )
 }
 
