@@ -8,7 +8,7 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { parseCommand } from './commandParser.js'
 import Database from 'better-sqlite3'
 import 'dotenv/config'
 
@@ -636,93 +636,15 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
     return res.status(400).json({ error: 'Mensagem inválida ou muito longa.' })
   if (!Array.isArray(tutores) || tutores.length > 500)
     return res.status(400).json({ error: 'Dados de tutores inválidos.' })
-  const key = getKV('gemini_api_key') || process.env.GEMINI_API_KEY
-  if (!key) return res.status(400).json({ error: 'API key não configurada. Acesse as configurações e insira sua chave Gemini.' })
   const srvSettings = getKV(serverKey(req, 'settings')) || {}
   const presencaApenasEmTeste = srvSettings.presencaApenasEmTeste === true
 
   const today = new Date()
   const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
   const todayStr = fmt(today)
-  const ontemStr = fmt(new Date(today - 86400000))
-
-  const diaSemana = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'][today.getDay()]
-  const todosNicks = (tutores || []).map(t => `${t.nick} (${t.cargo})`).join(', ')
-  const resumo = (tutores || []).map(t => {
-    const ausenciaAtiva = (t.ausencias || []).find(a => a.dataFim >= todayStr)
-    const ausenciaStr = ausenciaAtiva ? ` | AUSENTE até ${ausenciaAtiva.dataFim}` : ''
-    const obsStr = t.obs ? ` | obs: ${t.obs}` : ''
-
-    if (presencaApenasEmTeste && t.cargo !== 'Em Teste') {
-      return `- ${t.nick} | cargo: ${t.cargo} | na equipe desde: ${t.dataInicio || '?'} | atividade: ${t.atividade || 'Não Definida'} | SEM RASTREAMENTO DE PRESENÇA${ausenciaStr}${obsStr}`
-    }
-
-    const mesAtual = todayStr.slice(0, 7)
-    const todasPresencas = (t.presencas || []).slice().sort()
-    const presencasMesLista = todasPresencas.filter(d => d.startsWith(mesAtual))
-    const presencasMes = presencasMesLista.length
-    const ultimaPresenca = todasPresencas.at(-1) || null
-    const refDate = ultimaPresenca || t.dataInicio || todayStr
-    const diasSem = Math.floor((new Date(todayStr) - new Date(refDate)) / 86400000)
-    const semInfo = ultimaPresenca
-      ? `última presença: ${ultimaPresenca} (${diasSem}d atrás)`
-      : t.dataInicio >= todayStr
-        ? `entrou hoje — sem presenças ainda (0d)`
-        : `sem presenças — entrou em ${t.dataInicio} (${diasSem}d desde entrada)`
-    const datasPresenca = presencasMesLista.length ? ` | presenças este mês: [${presencasMesLista.join(', ')}]` : ''
-    const todasDatas = todasPresencas.length
-      ? ` | TODAS AS PRESENÇAS REGISTRADAS (use para dedup): [${todasPresencas.join(', ')}]`
-      : ' | nenhuma presença registrada'
-    return `- ${t.nick} | cargo: ${t.cargo} | na equipe desde: ${t.dataInicio || '?'} | presenças este mês: ${presencasMes}${datasPresenca}${todasDatas} | ${semInfo}${ausenciaStr}${obsStr}`
-  }).join('\n')
-
-  const historicoFmt = (history || []).slice(-8).map(m =>
-    `${m.role === 'user' ? 'usuário' : 'assistente'}: ${m.text}`
-  ).join('\n')
-
-  const prompt = `Assistente de gestão de tutores do servidor Rubinot. Hoje:${todayStr}(${diaSemana}) Ontem:${ontemStr}
-
-TUTORES:
-${resumo}
-
-NICKS: ${todosNicks}
-${historicoFmt ? `\nHISTÓRICO:\n${historicoFmt}\n` : ''}
-USUÁRIO: "${message}"
-
-Responda SOMENTE JSON puro: { "resposta": "...", "acoes": [] }
-
-AÇÕES — cada objeto DEVE ter o campo "tipo" exatamente como abaixo:
-{"tipo":"add_presenca","nick":"...","data":"YYYY-MM-DD"}
-{"tipo":"remove_presenca","nick":"...","data":"YYYY-MM-DD"}
-{"tipo":"add_presenca_todos","data":"YYYY-MM-DD","exceto":[]}
-{"tipo":"add_ausencia","nick":"...","dataInicio":"YYYY-MM-DD","dataFim":"YYYY-MM-DD","motivo":"..."}
-{"tipo":"remove_ausencia","nick":"..."}
-{"tipo":"change_cargo","nick":"...","cargo":"Tutor|Em Teste|Sênior|Inativo|Desligado"}
-{"tipo":"add_obs","nick":"...","obs":"..."}
-
-REGRAS (ordem de prioridade):
-1. DEDUP: antes de add_presenca OU add_presenca_todos, cheque "TODAS AS PRESENÇAS REGISTRADAS" — se data já existe para o nick → acoes:[], informe que já existe. Sem exceções.
-2. DATA PADRÃO: sem data especificada → use ${todayStr}. Nunca use datas anteriores como padrão.
-3. DATA FUTURA: não adicione após ${todayStr} sem avisar.
-4. AUSÊNCIA ATIVA: avise se data cai dentro do período de ausência.
-5. NICKS: use exatamente os nicks da lista. Se ambíguo → peça confirmação.
-6. AÇÃO DIRETA: nick+ação claros → execute sem pedir confirmação.
-6. CONFIRMAÇÕES ("sim","ok","pode","confirma"): execute exatamente o proposto na última mensagem. Nem mais, nem menos.
-7. add_presenca_todos: SOMENTE se usuário disser explicitamente "todos"/"todo mundo"/"geral".
-8. CONSULTAS: acoes:[] e responda em "resposta". Tutores com 0d NÃO são inativos. Para múltiplos, gere múltiplas acoes.${presencaApenasEmTeste ? `
-9. PRESENÇA RESTRITA: apenas tutores "Em Teste" têm presença contabilizada. NÃO adicione presença para outros cargos (Tutor, Sênior, Inativo). Se solicitado, informe que o tutor não está no período de teste.` : ''}`
 
   try {
-    const genAI = new GoogleGenerativeAI(key)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-    const result = await model.generateContent(prompt)
-    let text = result.response.text().trim()
-    if (text.startsWith('```')) text = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
-    if (!text.startsWith('{')) {
-      const m = text.match(/\{[\s\S]*\}/)
-      if (m) text = m[0]
-    }
-    const parsed = JSON.parse(text)
+    const parsed = parseCommand(message, tutores, history || [], { todayStr, presencaApenasEmTeste })
 
     // Server-side dedup: remove add_presenca e add_presenca_todos se data já existe
     if (Array.isArray(parsed.acoes)) {
@@ -834,13 +756,8 @@ REGRAS (ordem de prioridade):
 
     res.json(parsed)
   } catch (err) {
-    console.error('[IA-CHAT] erro:', err?.message || err)
-    const msg = err?.message || ''
-    const isKeyErr = /api.?key|invalid|permission|forbidden|unauthorized|403|400/i.test(msg) || err?.status === 403 || err?.status === 400
-    const clientMsg = isKeyErr
-      ? 'Chave da API inválida ou sem permissão. Verifique a chave Gemini nas configurações.'
-      : `Erro ao processar resposta da IA.${msg ? ` (${msg})` : ''}`
-    res.status(500).json({ error: clientMsg })
+    console.error('[CHAT] erro:', err?.message || err)
+    res.status(500).json({ error: `Erro ao processar comando.${err?.message ? ` (${err.message})` : ''}` })
   }
 })
 

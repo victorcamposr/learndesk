@@ -3979,13 +3979,11 @@ function AuditoriaPanel() {
 }
 
 // ── SettingsModal ─────────────────────────────────────────────────────────────
-function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, envConfigs, meInfo, onUpdateEnv, apiKeyConfigured, onSaveApiKey }) {
+function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, envConfigs, meInfo, onUpdateEnv }) {
   const [form, setForm]         = useState({ ...DEFAULT_CFG })
   const [tab, setTab]           = useState('config')
-  const [apiKey, setApiKey]     = useState('')
-  const [showApiKey, setShowApiKey] = useState(false)
   const showToastSettings       = useToast()
-  useEffect(() => { if (open) { setForm({ ..._cfg }); setTab(initialTab); setApiKey(''); setShowApiKey(false) } }, [open, initialTab])
+  useEffect(() => { if (open) { setForm({ ..._cfg }); setTab(initialTab) } }, [open, initialTab])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: Number(v) }))
   const setBool = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -4024,7 +4022,6 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
           { key: 'mundos',     label: 'Mundos',        icon: Swords },
           { key: 'devices',    label: 'Dispositivos',  icon: Monitor },
           { key: 'auditoria',  label: 'Auditoria',     icon: ClipboardList },
-          { key: 'ia',         label: 'IA',            icon: Sparkles },
         ] : [
           { key: 'config', label: 'Regras',  icon: BookOpen },
           { key: 'mundos', label: 'Mundos',  icon: Swords },
@@ -4051,83 +4048,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
       {tab === 'devices'   ? <DevicesPanel servers={servers} meInfo={meInfo} onUpdateEnv={onUpdateEnv} /> :
        tab === 'mundos'    ? <MundosPanel servers={servers} onUpdateEnv={onUpdateEnv} meInfo={meInfo} /> :
        tab === 'auditoria' ? <AuditoriaPanel /> :
-       tab === 'ia' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-          {/* Header com badge admin */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: `linear-gradient(135deg, ${C.primary}30, ${C.primaryBright}20)`, border: `1px solid ${C.primaryBright}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Sparkles size={15} color={C.primaryBright} />
-            </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>Integração Google Gemini</div>
-              <div style={{ fontSize: 11, color: C.textMuted }}>Chave de API para o assistente de IA</div>
-            </div>
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, color: C.gold, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.25)', borderRadius: 6, padding: '3px 9px', letterSpacing: '.05em', textTransform: 'uppercase', flexShrink: 0 }}>
-              <Shield size={10} /> Admin only
-            </div>
-          </div>
-
-          {/* Status card */}
-          <div style={{ background: apiKeyConfigured ? 'rgba(52,211,153,0.06)' : 'rgba(248,113,113,0.06)', border: `1px solid ${apiKeyConfigured ? 'rgba(52,211,153,0.2)' : 'rgba(248,113,113,0.2)'}`, borderRadius: 10, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: apiKeyConfigured ? '#34d399' : '#f87171', boxShadow: `0 0 8px ${apiKeyConfigured ? '#34d39960' : '#f8717160'}`, flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: apiKeyConfigured ? '#34d399' : '#f87171' }}>
-                {apiKeyConfigured ? 'Chave configurada' : 'Chave não configurada'}
-              </div>
-              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
-                {apiKeyConfigured ? 'O assistente de IA está ativo e pronto para uso' : 'Configure a chave abaixo para ativar o assistente'}
-              </div>
-            </div>
-          </div>
-
-          {/* Input da chave */}
-          <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '16px' }}>
-            <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <Key size={11} color={C.gold} /> Chave da API Google Gemini
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                style={{ ...inputBase, fontSize: 12, fontFamily: 'monospace', paddingRight: 44, letterSpacing: apiKey ? 0 : (apiKeyConfigured ? 2 : 0) }}
-                type={showApiKey ? 'text' : 'password'}
-                placeholder={apiKeyConfigured ? '••••••••••••••••••••••••••••••••••••••' : 'AIzaSy...'}
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-              />
-              <button
-                onClick={() => setShowApiKey(v => !v)}
-                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 4, borderRadius: 4, transition: 'color .15s' }}
-                title={showApiKey ? 'Ocultar' : 'Mostrar'}
-              >
-                {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 8, lineHeight: 1.5 }}>
-              {apiKeyConfigured
-                ? 'Digite uma nova chave para substituir a atual. Deixe vazio para manter.'
-                : <>Obtenha sua chave em <span style={{ color: C.primaryBright, fontFamily: 'monospace' }}>aistudio.google.com</span></>
-              }
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-              <button
-                style={{ ...btn('gold'), opacity: apiKey.trim() ? 1 : 0.4, transition: 'opacity .15s' }}
-                disabled={!apiKey.trim()}
-                onClick={async () => {
-                  try {
-                    await onSaveApiKey(apiKey.trim())
-                    setApiKey('')
-                    showToastSettings('Chave Gemini salva com sucesso')
-                  } catch (e) {
-                    showToastSettings(e.message || 'Erro ao salvar chave', 'error')
-                  }
-                }}
-              >
-                <Save size={13} /> Salvar chave
-              </button>
-            </div>
-          </div>
-        </div>
-       ) : (
+       (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
         {/* Toggle atividade automática */}
@@ -5340,7 +5261,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Assistente Rubinot</div>
-              <div style={{ fontSize: 10, color: C.textMuted }}>Gemini · comandos em linguagem natural</div>
+              <div style={{ fontSize: 10, color: C.textMuted }}>comandos em linguagem natural</div>
             </div>
             <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 4, display: 'flex' }}>
               <X size={15} />
@@ -6098,7 +6019,6 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
   const [dataLoaded, setDataLoaded]     = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab]   = useState('config')
-  const [apiKeyConfigured, setApiKeyConfigured] = useState(false)
 
   const [pendingDevices, setPendingDevices] = useState(0)
 
@@ -6129,29 +6049,18 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     setSettingsOpen(false)
   }
 
-  const handleSaveApiKey = async key => {
-    const res = await apiFetch('/api/config/apikey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: key }) })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || `Erro ${res.status}`)
-    }
-    setApiKeyConfigured(true)
-  }
-
   // Carrega do servidor (SQLite via API)
   useEffect(() => {
     Promise.all([
       apiFetch('/api/tutores').then(r => r.json()),
       apiFetch('/api/settings').then(r => r.json()).catch(() => ({})),
-      apiFetch('/api/config/apikey').then(r => r.json()).catch(() => ({})),
-    ]).then(([tutoresData, settingsData, apikeyData]) => {
+    ]).then(([tutoresData, settingsData]) => {
       setTutores(Array.isArray(tutoresData) ? tutoresData : [])
       if (settingsData && !settingsData.error && Object.keys(settingsData).length > 0) {
         const merged = { ...DEFAULT_CFG, ...settingsData }
         _cfg = merged
         setCfg(merged)
       }
-      if (apikeyData?.configured) setApiKeyConfigured(true)
     }).catch(() => setTutores([]))
       .finally(() => { pendingAuditRef.current = { skip: true }; setDataLoaded(true) })
   }, [])
@@ -6216,8 +6125,6 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
         envConfigs={envConfigs || {}}
         meInfo={meInfo || { apelido: '', isAdmin: false }}
         onUpdateEnv={onUpdateEnv}
-        apiKeyConfigured={apiKeyConfigured}
-        onSaveApiKey={handleSaveApiKey}
       />
       {meInfo?.isAdmin && pendingDevices > 0 && (
         <button
