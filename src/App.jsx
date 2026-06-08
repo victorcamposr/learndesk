@@ -836,9 +836,10 @@ const DESLIGAMENTO_MOTIVOS = [
 ]
 
 function DesligamentoModal({ tutor, open, onClose, onConfirm }) {
-  const [motivo, setMotivo]   = useState(null)
+  const [motivo, setMotivo]     = useState(null)
+  const [destino, setDestino]   = useState('')
   const [detalhes, setDetalhes] = useState('')
-  useEffect(() => { if (open) { setMotivo(null); setDetalhes('') } }, [open])
+  useEffect(() => { if (open) { setMotivo(null); setDestino(''); setDetalhes('') } }, [open])
 
   const selected = DESLIGAMENTO_MOTIVOS.find(m => m.key === motivo)
 
@@ -854,7 +855,8 @@ function DesligamentoModal({ tutor, open, onClose, onConfirm }) {
       const dt = new Date(y, mo - 1, d + 45)
       const pad = n => String(n).padStart(2, '0')
       const date45 = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
-      obsText = `Solicitou transferência em ${formatDate(today)}.\n\nPoderá solicitar nova transferência somente após ${formatDate(date45)}.`
+      const destStr = destino.trim() ? ` para ${destino.trim()}` : ''
+      obsText = `Solicitou transferência${destStr} em ${formatDate(today)}.\n\nPoderá solicitar nova transferência somente após ${formatDate(date45)}.`
       if (detalhes.trim()) obsText += `\n\n${detalhes.trim()}`
     } else if (motivo === 'inatividade') {
       obsText = 'Desligado por inatividade.'
@@ -893,25 +895,46 @@ function DesligamentoModal({ tutor, open, onClose, onConfirm }) {
           </button>
         ))}
 
-        {selected?.hasDetails && (
+        {motivo === 'solicitou_transferencia' && (
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div>
+              <label style={labelStyle}>Para onde foi (servidor / equipe)</label>
+              <input
+                autoFocus
+                style={{ ...inputBase, fontSize: 13 }}
+                value={destino}
+                onChange={e => setDestino(e.target.value)}
+                placeholder="Ex: Grimoria, Shadow Guild..."
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Observações adicionais (opcional)</label>
+              <textarea
+                style={{ ...inputBase, minHeight: 60, resize: 'vertical', fontSize: 13 }}
+                value={detalhes}
+                onChange={e => setDetalhes(e.target.value)}
+                placeholder="Outros detalhes relevantes..."
+              />
+            </div>
+            <div style={{
+              background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)',
+              borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#fca5a5', lineHeight: 1.6,
+            }}>
+              Será registrado automaticamente: poderá solicitar nova transferência somente <strong>após 45 dias</strong>.
+            </div>
+          </div>
+        )}
+
+        {(motivo === 'solicitou_desligamento' || motivo === 'ma_conduta') && (
           <div style={{ marginTop: 4 }}>
-            <label style={labelStyle}>Mais informações</label>
+            <label style={labelStyle}>{motivo === 'solicitou_desligamento' ? 'Motivo do pedido' : 'Descrição da má conduta'}</label>
             <textarea
               autoFocus
               style={{ ...inputBase, minHeight: 80, resize: 'vertical', fontSize: 13 }}
               value={detalhes}
               onChange={e => setDetalhes(e.target.value)}
-              placeholder="Descreva mais detalhes..."
+              placeholder={motivo === 'solicitou_desligamento' ? 'Ex: motivo pessoal, insatisfação, problemas...' : 'Descreva o ocorrido...'}
             />
-          </div>
-        )}
-
-        {motivo === 'solicitou_transferencia' && (
-          <div style={{
-            background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)',
-            borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#fca5a5', lineHeight: 1.6,
-          }}>
-            Será registrado automaticamente: poderá solicitar nova transferência somente <strong>após 45 dias</strong>.
           </div>
         )}
 
@@ -1273,7 +1296,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
   const obsDesligamento = isDesligado && hasObs
   const diasAlerta      = isDesligado || !_cfg.atividadeAutomatica ? null : diasSemPresenca(tutor)
   const atividadeColor  = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
-  const accentColor     = isDesligado ? (CARGO_COLORS['Desligado']) : diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
+  const accentColor     = isDesligado ? '#6b7280' : diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
 
   return (
     <div
@@ -1283,6 +1306,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
         borderRadius: 16,
         transition: 'all .22s',
         cursor: 'default',
+        opacity: isDesligado ? 0.72 : 1,
         boxShadow: hover
           ? `inset 0 3px 0 ${accentColor}, 0 0 0 1px ${accentColor}35, 0 16px 48px rgba(0,0,0,0.6), 0 0 36px ${accentColor}14`
           : `inset 0 3px 0 ${accentColor}99, 0 4px 20px rgba(0,0,0,0.5)`,
@@ -1316,7 +1340,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
             letterSpacing: '-0.02em', color: accentColor,
             boxShadow: `0 0 12px ${accentColor}20`,
           }}>
-            {emAusencia ? <Palmtree size={17} /> : tutor.nick[0]?.toUpperCase()}
+            {emAusencia && !isDesligado ? <Palmtree size={17} /> : tutor.nick[0]?.toUpperCase()}
           </div>
 
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -1391,7 +1415,7 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
             </span>
           )}
 
-          {tutor.dataEfetivacao && (
+          {tutor.dataEfetivacao && !isDesligado && (
             <span style={{
               background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.35)',
               borderRadius: 6, color: '#34d399',
