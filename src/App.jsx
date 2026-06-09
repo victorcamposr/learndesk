@@ -3830,12 +3830,14 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const [adminApelidos, setAdminAp]         = useState([])
   const [permissions, setPerms]             = useState({})
   const [loading, setLoading]               = useState(false)
+  const [accessDenied, setAccessDenied]     = useState(false)
   const [search, setSearch]                 = useState('')
   const [statusFilter, setStatusFilter]     = useState('all')
   const prevPendingRef                      = useRef(-1)
   const showToast                           = useToast()
 
   const load = useCallback(async (silent = false) => {
+    if (!meInfo?.isAdmin) { setAccessDenied(true); return }
     if (!silent) setLoading(true)
     try {
       const [rDev, rAdm, rPerm] = await Promise.all([
@@ -3843,6 +3845,10 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
         apiFetch('/api/admin/apelidos'),
         apiFetch('/api/auth/devices/permissions'),
       ])
+      if (rDev.status === 403 || rAdm.status === 403 || rPerm.status === 403) {
+        setAccessDenied(true)
+        return
+      }
       if (rDev.ok) {
         const list = await rDev.json()
         const pendingNow = list.filter(d => d.status === 'pending').length
@@ -3911,6 +3917,12 @@ function DevicesPanel({ servers, meInfo, onUpdateEnv }) {
   const others  = filtered.filter(d => d.status !== 'pending')
 
   const rowProps = { adminApelidos, permissions, servers, onAct: act, onToggleAdmin: toggleAdmin, onSavePerms: handleSavePerms, currentApelido: meInfo?.apelido }
+
+  if (accessDenied) return (
+    <div style={{ padding: '32px 16px', textAlign: 'center', color: '#f87171', fontSize: 13 }}>
+      Acesso negado. Esta área é restrita a administradores.
+    </div>
+  )
 
   return (
     <div>
@@ -4997,6 +5009,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
   const [pendingDevices, setPendingDevices] = useState(0)
 
   useEffect(() => {
+    if (!meInfo?.isAdmin) return
     const check = async () => {
       try {
         const r = await apiFetch('/api/auth/devices')
@@ -5010,7 +5023,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
     const id = setInterval(check, 12000)
     window.addEventListener('rubinot:devices-changed', check)
     return () => { clearInterval(id); window.removeEventListener('rubinot:devices-changed', check) }
-  }, [])
+  }, [meInfo?.isAdmin])
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10)
@@ -5154,7 +5167,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
                 </div>
 
                 {/* Dispositivos pendentes */}
-                {pendingDevices > 0 && (
+                {meInfo?.isAdmin && pendingDevices > 0 && (
                   <button
                     onClick={() => { setBellOpen(false); if (meInfo?.isAdmin) onOpenSettingsDevices?.() }}
                     style={{

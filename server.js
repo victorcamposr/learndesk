@@ -104,7 +104,7 @@ const requireAdmin = (req, res, next) => {
 
 const requireServerAccess = (req, res, next) => {
   const s = req.headers['x-server']
-  if (!s || !getValidServers().includes(s)) return next()
+  if (!s || !getValidServers().includes(s)) return res.status(400).json({ error: 'Servidor inválido' })
   if (isAdminReq(req)) return next()
   const dt = req.headers['x-device-token']
   const perm = (dt && getDevicePerms()[dt]) || {}
@@ -288,6 +288,11 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
 app.post('/api/auth/set-password', async (req, res) => {
   const { deviceToken, password } = req.body || {}
 
+  // Impede que outro dispositivo autenticado defina senha em nome de terceiros
+  const callerToken = req.headers['x-device-token']
+  if (callerToken && callerToken !== deviceToken)
+    return res.status(403).json({ error: 'Acesso negado' })
+
   const devices = getDevices()
   const device = deviceToken && typeof deviceToken === 'string' ? devices[deviceToken] : null
   if (!device || device.status !== 'approved')
@@ -428,7 +433,7 @@ app.post('/api/auth/device-status', deviceStatusLimiter, (req, res) => {
   res.json(result)
 })
 
-app.get('/api/auth/devices', requireAuth, (_req, res) => {
+app.get('/api/auth/devices', requireAuth, requireAdmin, (_req, res) => {
   const devices = getDevices()
   res.json(Object.entries(devices).map(([token, d]) => ({ token, ...d })))
 })
@@ -763,7 +768,7 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
 
 app.get('/api/settings', requireAuth, requireServerAccess, (req, res) => res.json(getKV(serverKey(req, 'settings')) || {}))
 
-app.post('/api/settings', requireAuth, requireServerAccess, (req, res) => {
+app.post('/api/settings', requireAuth, requireAdmin, requireServerAccess, (req, res) => {
   const { settings } = req.body || {}
   if (!settings || typeof settings !== 'object' || Array.isArray(settings))
     return res.status(400).json({ error: 'Dados inválidos' })
