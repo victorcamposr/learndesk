@@ -5837,7 +5837,7 @@ function SetPasswordScreen({ apelido, onDone }) {
     try {
       const res = await fetch(API + '/api/auth/set-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-device-token': getDeviceToken() },
         body: JSON.stringify({ password, deviceToken: getDeviceToken() }),
       })
       const data = await res.json()

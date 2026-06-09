@@ -107,8 +107,12 @@ const requireServerAccess = (req, res, next) => {
   if (!s || !getValidServers().includes(s)) return res.status(400).json({ error: 'Servidor inválido' })
   if (isAdminReq(req)) return next()
   const dt = req.headers['x-device-token']
-  const perm = (dt && getDevicePerms()[dt]) || {}
-  if (!perm.allowedServers || perm.allowedServers.includes(s)) return next()
+  const perms = getDevicePerms()
+  const hasPerm = dt && Object.prototype.hasOwnProperty.call(perms, dt)
+  if (!hasPerm) return res.status(403).json({ error: 'Permissões não configuradas para este dispositivo' })
+  const perm = perms[dt]
+  // allowedServers === null significa acesso total (configurado explicitamente pelo admin)
+  if (perm.allowedServers === null || perm.allowedServers.includes(s)) return next()
   return res.status(403).json({ error: 'Sem acesso a este servidor' })
 }
 
@@ -288,9 +292,9 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
 app.post('/api/auth/set-password', async (req, res) => {
   const { deviceToken, password } = req.body || {}
 
-  // Impede que outro dispositivo autenticado defina senha em nome de terceiros
+  // Exige que x-device-token corresponda ao deviceToken do body (sem auth, mas token deve bater)
   const callerToken = req.headers['x-device-token']
-  if (callerToken && callerToken !== deviceToken)
+  if (!callerToken || callerToken !== deviceToken)
     return res.status(403).json({ error: 'Acesso negado' })
 
   const devices = getDevices()
