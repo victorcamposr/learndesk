@@ -20,7 +20,7 @@ import {
   Cloud, Leaf, Key, Ghost, Wand2, Axe, Sword, Crosshair,
   Skull, Fish, Flower, Castle, Dices, Scroll, Infinity,
   Hexagon, Triangle, Diamond, Layers, Radio, Telescope,
-  Binoculars, Microscope, Sunrise, Tornado,
+  Binoculars, Microscope, Sunrise, Tornado, Lightbulb,
 } from 'lucide-react'
 
 const mkRoman = r => ({ size = 16, color = 'currentColor' }) => (
@@ -5468,6 +5468,13 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     }])
   }
 
+  const showCapabilities = () => {
+    setMsgs(prev => [...prev,
+      { role: 'user', text: 'O que você pode fazer?' },
+      { role: 'ai', text: `Posso ajudar com:\n\n• Registrar presença — "adiciona presença hoje pro Campin"\n• Remover presença — "remove presença de ontem do Zek"\n• Presença em lote — "adiciona presença hoje pra todos"\n• Ausência — "coloca Campin de férias de 15/06 a 22/06"\n• Mudar cargo — "efetiva o Zek"\n• Observação — "adiciona obs no Campin: pendência de recrutamento"\n• Log do canal — cole o histórico do chat de suporte e eu detecto quem estava ativo automaticamente` },
+    ])
+  }
+
   // ── send ──────────────────────────────────────────────────────────────────────
   const send = async () => {
     const msg = input.trim()
@@ -5690,7 +5697,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
                       ? `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`
                       : m.error ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.05)',
                     border: m.role === 'ai' ? `1px solid ${m.error ? 'rgba(239,68,68,0.3)' : C.border}` : 'none',
-                    fontSize: 13, color: m.error ? '#f87171' : C.text, lineHeight: 1.5,
+                    fontSize: 13, color: m.error ? '#f87171' : C.text, lineHeight: 1.5, whiteSpace: 'pre-line',
                   }}>
                     {m.text}
                     {m.acoes > 0 && (
@@ -5707,6 +5714,20 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
                 </div>
               )
             ))}
+            {msgs.length === 1 && (
+              <div style={{ display: 'flex', justifyContent: 'flex-start', paddingLeft: 2 }}>
+                <button
+                  onClick={showCapabilities}
+                  style={{
+                    background: 'rgba(99,102,241,0.1)', border: `1px solid ${C.primaryBright}40`,
+                    borderRadius: 20, padding: '5px 12px', fontSize: 11.5, color: C.primaryBright,
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontWeight: 500,
+                  }}
+                >
+                  <Lightbulb size={11} /> O que você pode fazer?
+                </button>
+              </div>
+            )}
             {loading && (
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                 <div style={{ padding: '9px 13px', borderRadius: '14px 14px 14px 4px', background: 'rgba(255,255,255,0.05)', border: `1px solid ${C.border}`, display: 'flex', gap: 5, alignItems: 'center' }}>
@@ -5726,7 +5747,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-              placeholder={'Ex: adiciona presença hoje pro Campin\nOu cole um log do canal de suporte…'}
+              placeholder="Perguntar ou colar log do canal…"
               rows={input.includes('\n') || input.length > 80 ? Math.min(5, input.split('\n').length + 1) : 1}
               style={{
                 ...inputBase, flex: 1, fontSize: 12, padding: '8px 12px', borderRadius: 10,
