@@ -238,8 +238,9 @@ function extractObs(msg, nick) {
   if (colon) return colon[1].trim()
   const que = msg.match(/\bque\b\s+(.+)$/i)
   if (que) return que[1].trim()
+  const escapedNick = nick.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return msg
-    .replace(new RegExp(nick, 'gi'), '')
+    .replace(new RegExp(escapedNick, 'gi'), '')
     .replace(/\b(add|obs|observação|observacao|nota|anota|anotar|do|da|pro|pra|no|na)\b/gi, '')
     .replace(/\s+/g, ' ').trim()
 }

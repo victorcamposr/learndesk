@@ -645,6 +645,12 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
     return res.status(400).json({ error: 'Mensagem inválida ou muito longa.' })
   if (!Array.isArray(tutores) || tutores.length > 500)
     return res.status(400).json({ error: 'Dados de tutores inválidos.' })
+  if (!Array.isArray(history) && history != null)
+    return res.status(400).json({ error: 'Histórico inválido.' })
+  const safeHistory = (Array.isArray(history) ? history : []).slice(-20).map(h => ({
+    role: typeof h?.role === 'string' ? h.role : '',
+    text: typeof h?.text === 'string' ? h.text.slice(0, 500) : '',
+  })).filter(h => h.role && h.text)
   const srvSettings = getKV(serverKey(req, 'settings')) || {}
   const presencaApenasEmTeste = srvSettings.presencaApenasEmTeste === true
 
@@ -653,7 +659,7 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
   const todayStr = fmt(today)
 
   try {
-    const parsed = parseCommand(message, tutores, history || [], { todayStr, presencaApenasEmTeste })
+    const parsed = parseCommand(message, tutores, safeHistory, { todayStr, presencaApenasEmTeste })
 
     // Server-side dedup: remove add_presenca e add_presenca_todos se data já existe
     if (Array.isArray(parsed.acoes)) {
@@ -721,7 +727,6 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
       const ATIVOS = presencaApenasEmTeste ? ['Em Teste'] : ['Tutor', 'Em Teste', 'Sênior']
       const storedKey = serverKey(req, 'tutores')
       const stored = getKV(storedKey) || []
-      console.log(`[IA-APPLY] key=${storedKey} acoes=${JSON.stringify(parsed.acoes.map(a=>({tipo:a.tipo,nick:a.nick,data:a.data})))} stored_nicks=${stored.map(t=>t.nick).join('|')}`)
       let updatedStored = [...stored]
       for (const a of parsed.acoes) {
         if (a.tipo === 'add_presenca_todos') {
@@ -758,8 +763,6 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
         }
       }
       setKV(storedKey, updatedStored)
-      const afterNeo = updatedStored.find(t => t.nick?.toLowerCase().includes('neo'))
-      console.log(`[IA-APPLY] saved. neo_presencas=${JSON.stringify(afterNeo?.presencas)}`)
       parsed._tutores = enrichTutores(updatedStored, srvSettings, new Date())
     }
 
