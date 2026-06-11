@@ -2042,9 +2042,8 @@ const FILTER_TABS = [
   { key: 'inativos', label: 'Inativos / Desligados' },
 ]
 
-// ── ChatPresencaModal ─────────────────────────────────────────────────────────
+// ── parseChatLog — extrai nomes únicos de um log de canal (HH:MM:SS Nome [nível]: msg) ──
 function parseChatLog(text) {
-  // Formato: HH:MM:SS PlayerName [level]: message
   const re = /^\d{2}:\d{2}:\d{2}\s+(.+?)\s+\[\d+\]:/gm
   const nomes = new Set()
   let m
@@ -2053,161 +2052,6 @@ function parseChatLog(text) {
     if (nome) nomes.add(nome)
   }
   return [...nomes]
-}
-
-function ChatPresencaModal({ open, onClose, tutores, onConfirm }) {
-  const [log, setLog]                       = useState('')
-  const [encontrados, setEncontrados]       = useState([])
-  const [naoEncontrados, setNaoEncontrados] = useState([])
-  const [selecionados, setSelecionados]     = useState(new Set())
-  const [dataLog, setDataLog]               = useState(todayStr())
-  const [fase, setFase]                     = useState('input')
-
-  useEffect(() => {
-    if (!open) {
-      setLog(''); setEncontrados([]); setNaoEncontrados([])
-      setSelecionados(new Set()); setDataLog(todayStr()); setFase('input')
-    }
-  }, [open])
-
-  const handleAnalisar = () => {
-    if (!log.trim() || !dataLog) return
-    const nomes = parseChatLog(log)
-    const matched = [], unmatched = []
-    for (const nome of nomes) {
-      const tutor = tutores.find(t => t.nick.toLowerCase() === nome.toLowerCase())
-      if (tutor) {
-        const jaTemData = (tutor.presencas || []).includes(dataLog)
-        // Se presencaApenasEmTeste está ativo, só Em Teste têm presença contabilizada
-        const naoAplica = _cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste'
-        matched.push({ tutor, jaTemData, naoAplica })
-      } else {
-        unmatched.push(nome)
-      }
-    }
-    // Pré-seleciona quem ainda não tem presença na data e tem presença aplicável
-    setSelecionados(new Set(matched.filter(m => !m.jaTemData && !m.naoAplica).map(m => m.tutor.id)))
-    setEncontrados(matched)
-    setNaoEncontrados(unmatched)
-    setFase('preview')
-  }
-
-  const handleConfirm = () => { onConfirm({ ids: [...selecionados], data: dataLog }); onClose() }
-
-  const toggleAll = () => {
-    const pendentes = encontrados.filter(m => !m.jaTemData && !m.naoAplica)
-    setSelecionados(selecionados.size === pendentes.length ? new Set() : new Set(pendentes.map(m => m.tutor.id)))
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Presença via Chat" icon={MessageSquare}>
-      {fase === 'input' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {!_cfg.atividadeAutomatica && (
-            <div style={{ background: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.3)', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#f97316' }}>
-              Atenção: "Atividade Automática" está desativada. As presenças serão registradas, mas não afetarão o cálculo de atividade.
-            </div>
-          )}
-          <div style={{ fontSize: 13, color: C.textSoft }}>
-            Cole o histórico do canal de suporte. O sistema extrai os nomes automaticamente e registra presença apenas para tutores cadastrados, sem duplicatas.
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: C.textSoft, display: 'block', marginBottom: 6 }}>Data do log</label>
-            <input
-              type="date"
-              value={dataLog}
-              max={todayStr()}
-              onChange={e => setDataLog(e.target.value)}
-              style={{ ...inputBase, width: 'auto' }}
-            />
-          </div>
-          <textarea
-            value={log}
-            onChange={e => setLog(e.target.value)}
-            placeholder={'10:03:53 Itachi Hiraishin [465]: entrou a double?\n10:04:17 Lopez Menino [611]: double skill ja está ativo??'}
-            style={{ ...inputBase, minHeight: 200, resize: 'vertical', fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5 }}
-          />
-          <button style={btn('primary')} disabled={!log.trim() || !dataLog} onClick={handleAnalisar}>
-            <Search size={14} /> Analisar Log
-          </button>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ fontSize: 13, color: C.textSoft }}>
-            <strong style={{ color: C.text }}>{encontrados.length}</strong> tutor{encontrados.length !== 1 ? 'es' : ''} encontrado{encontrados.length !== 1 ? 's' : ''} · data: <strong style={{ color: C.primaryBright }}>{dataLog}</strong>
-            {naoEncontrados.length > 0 && <> · <strong style={{ color: C.textMuted }}>{naoEncontrados.length}</strong> nome{naoEncontrados.length !== 1 ? 's' : ''} não cadastrado{naoEncontrados.length !== 1 ? 's' : ''}.</>}
-          </div>
-
-          {encontrados.length > 0 && (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: C.textSoft, letterSpacing: .5 }}>TUTORES ENCONTRADOS</span>
-                <button style={btn('ghost', 'sm')} onClick={toggleAll}>
-                  {selecionados.size > 0 ? 'Desmarcar todos' : 'Marcar todos'}
-                </button>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
-                {encontrados.map(({ tutor, jaTemData, naoAplica }) => {
-                  const sel = selecionados.has(tutor.id)
-                  const bloqueado = jaTemData || naoAplica
-                  return (
-                    <div
-                      key={tutor.id}
-                      onClick={() => {
-                        if (bloqueado) return
-                        setSelecionados(prev => { const n = new Set(prev); sel ? n.delete(tutor.id) : n.add(tutor.id); return n })
-                      }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8,
-                        cursor: bloqueado ? 'default' : 'pointer', opacity: bloqueado ? 0.6 : 1,
-                        background: jaTemData ? 'rgba(34,197,94,0.06)' : sel ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
-                        border: `1px solid ${jaTemData ? '#22c55e30' : sel ? C.primaryBright + '50' : C.border}`,
-                      }}
-                    >
-                      <div style={{
-                        width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-                        background: jaTemData ? '#22c55e' : sel ? C.primaryBright : 'transparent',
-                        border: `2px solid ${jaTemData ? '#22c55e' : sel ? C.primaryBright : C.border}`,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        {(jaTemData || sel) && <Check size={10} color="#fff" />}
-                      </div>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: C.text, flex: 1 }}>{tutor.nick}</span>
-                      <span style={{ fontSize: 11, color: C.textMuted }}>{tutor.cargo}</span>
-                      {jaTemData && <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600 }}>já registrado</span>}
-                      {naoAplica && !jaTemData && <span style={{ fontSize: 10, color: C.textMuted }}>presença n/a</span>}
-                    </div>
-                  )
-                })}
-              </div>
-            </>
-          )}
-
-          {naoEncontrados.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: C.textSoft, letterSpacing: .5 }}>NÃO CADASTRADOS ({naoEncontrados.length})</span>
-              <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.8, maxHeight: 80, overflowY: 'auto', padding: '6px 10px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, border: `1px solid ${C.border}` }}>
-                {naoEncontrados.join(' · ')}
-              </div>
-            </div>
-          )}
-
-          {encontrados.length === 0 && (
-            <div style={{ textAlign: 'center', color: C.textMuted, fontSize: 13, padding: '24px 0' }}>
-              Nenhum tutor cadastrado encontrado no log.
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button style={btn('ghost')} onClick={() => setFase('input')}><X size={14} /> Voltar</button>
-            <button style={{ ...btn('primary'), flex: 1 }} disabled={selecionados.size === 0} onClick={handleConfirm}>
-              <Check size={14} /> Registrar {selecionados.size} presença{selecionados.size !== 1 ? 's' : ''} em {dataLog}
-            </button>
-          </div>
-        </div>
-      )}
-    </Modal>
-  )
 }
 
 // ── ImportModal ───────────────────────────────────────────────────────────────
@@ -2473,9 +2317,8 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
   const [editId, setEditId]         = useState(null)
   const [ausenciaId, setAusenciaId] = useState(null)
   const [obsId, setObsId]           = useState(null)
-  const [importOpen, setImportOpen]           = useState(false)
-  const [exportOpen, setExportOpen]           = useState(false)
-  const [chatPresencaOpen, setChatPresencaOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const [profileId, setProfileId]   = useState(null)
   const [search, setSearch]         = useState('')
   const [viewMode, setViewMode]     = useState('list')
@@ -2501,15 +2344,6 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
         return { ...t, obs: text, obsHistorico: [...(t.obsHistorico || []), entrada] }
       }
       return { ...t, obs: text }
-    }))
-  }
-  const handleChatPresenca = ({ ids, data }) => {
-    if (!ids.length) return
-    if (pendingAuditRef) pendingAuditRef.current = { action: 'presenca_add', nick: `${ids.length} via chat`, details: { data, count: ids.length } }
-    setTutores(prev => prev.map(t => {
-      if (!ids.includes(t.id)) return t
-      const presencas = t.presencas || []
-      return { ...t, presencas: [...new Set([...presencas, data])], atividadeCalculada: null, apto: null }
     }))
   }
   const handlePresenca    = (id, add) => {
@@ -2606,9 +2440,6 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        <button style={btn('subtle')} onClick={() => setChatPresencaOpen(true)}>
-          <MessageSquare size={15} /> Presença via Chat
-        </button>
         <button style={btn('subtle')} onClick={() => setImportOpen(true)}>
           <ClipboardList size={15} /> Importar
         </button>
@@ -2711,13 +2542,6 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
       <Modal open={modalOpen} onClose={handleClose} title={editId !== null ? 'Editar Tutor' : 'Cadastrar Novo Tutor'} icon={UserPlus}>
         <TutorForm tutores={tutores} setTutores={setTutores} editId={editId} onDone={handleClose} pendingAuditRef={pendingAuditRef} />
       </Modal>
-
-      <ChatPresencaModal
-        open={chatPresencaOpen}
-        onClose={() => setChatPresencaOpen(false)}
-        tutores={tutores}
-        onConfirm={handleChatPresenca}
-      />
 
       <ImportModal
         open={importOpen}
@@ -5576,10 +5400,94 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     return acoes.length
   }
 
+  // ── Estado e handlers para detecção de log de canal ─────────────────────────
+  const [preview, setPreview] = useState(null)
+  // preview: { matched: [{tutor, jaTemData, naoAplica}], unmatched: string[],
+  //            dataLog: string, selecionados: Set<id>, confirmed: boolean, linhas: number }
+
+  const buildPreview = useCallback((text, data) => {
+    const nomes = parseChatLog(text)
+    const matched = [], unmatched = []
+    for (const nome of nomes) {
+      const tutor = tutores.find(t => t.nick.toLowerCase() === nome.toLowerCase())
+      if (tutor) {
+        const jaTemData = (tutor.presencas || []).includes(data)
+        const naoAplica = _cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste'
+        matched.push({ tutor, jaTemData, naoAplica })
+      } else {
+        unmatched.push(nome)
+      }
+    }
+    const selecionados = new Set(matched.filter(m => !m.jaTemData && !m.naoAplica).map(m => m.tutor.id))
+    return { matched, unmatched, dataLog: data, selecionados, confirmed: false, linhas: text.trim().split('\n').length }
+  }, [tutores])
+
+  const handleChangeDate = (newDate) => {
+    if (!preview || !newDate) return
+    const updated = {
+      ...preview,
+      dataLog: newDate,
+      matched: preview.matched.map(m => ({
+        ...m,
+        jaTemData: (m.tutor.presencas || []).includes(newDate),
+      })),
+    }
+    updated.selecionados = new Set(updated.matched.filter(m => !m.jaTemData && !m.naoAplica).map(m => m.tutor.id))
+    setPreview(updated)
+  }
+
+  const handleToggleTutor = (id) => {
+    if (!preview) return
+    const n = new Set(preview.selecionados)
+    n.has(id) ? n.delete(id) : n.add(id)
+    setPreview({ ...preview, selecionados: n })
+  }
+
+  const handleToggleAll = () => {
+    if (!preview) return
+    const pendentes = preview.matched.filter(m => !m.jaTemData && !m.naoAplica)
+    const allSel = pendentes.length > 0 && pendentes.every(m => preview.selecionados.has(m.tutor.id))
+    setPreview({ ...preview, selecionados: allSel ? new Set() : new Set(pendentes.map(m => m.tutor.id)) })
+  }
+
+  const handleConfirmLog = () => {
+    if (!preview || !preview.selecionados.size) return
+    const ids = [...preview.selecionados]
+    const { dataLog } = preview
+    if (pendingAuditRef) pendingAuditRef.current = { action: 'presenca_add', nick: `${ids.length} via log`, details: { data: dataLog, count: ids.length } }
+    setTutores(prev => prev.map(t => {
+      if (!ids.includes(t.id)) return t
+      return { ...t, presencas: [...new Set([...(t.presencas || []), dataLog])], atividadeCalculada: null, apto: null }
+    }))
+    const count = ids.length
+    setPreview(p => ({ ...p, confirmed: true }))
+    setMsgs(prev => [...prev, {
+      role: 'ai',
+      text: `${count} presença${count > 1 ? 's' : ''} registrada${count > 1 ? 's' : ''} em ${dataLog}.`,
+      acoes: count,
+    }])
+  }
+
+  // ── send ──────────────────────────────────────────────────────────────────────
   const send = async () => {
     const msg = input.trim()
     if (!msg || loading) return
     setInput('')
+
+    // Detecta log de canal: ≥3 linhas no formato "HH:MM:SS Nome [nível]:"
+    const logLineCount = (msg.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
+    if (logLineCount >= 3) {
+      const p = buildPreview(msg, todayStr())
+      setPreview(p)
+      const jogadores = p.matched.length + p.unmatched.length
+      setMsgs(prev => [...prev,
+        { role: 'user', text: `📋 Log do canal (${p.linhas} linhas · ${jogadores} jogador${jogadores !== 1 ? 'es' : ''} único${jogadores !== 1 ? 's' : ''})` },
+        { role: 'log-preview' },
+      ])
+      return
+    }
+
+    // Fluxo normal → IA
     setMsgs(prev => [...prev, { role: 'user', text: msg }])
     setLoading(true)
     try {
@@ -5606,12 +5514,145 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     }
   }
 
+  // ── Renderização do card de log inline ────────────────────────────────────────
+  const renderLogPreview = () => {
+    if (!preview || preview.confirmed) return null
+    const { matched, unmatched, dataLog, selecionados } = preview
+    const pendentes = matched.filter(m => !m.jaTemData && !m.naoAplica)
+    const allSel = pendentes.length > 0 && pendentes.every(m => selecionados.has(m.tutor.id))
+
+    return (
+      <div style={{
+        background: 'rgba(99,102,241,0.07)', border: `1px solid ${C.primaryBright}28`,
+        borderRadius: 14, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10,
+      }}>
+        {/* Cabeçalho */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <ClipboardList size={13} color={C.primaryBright} style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: C.text, flex: 1 }}>
+            Log detectado — {matched.length} tutor{matched.length !== 1 ? 'es' : ''} encontrado{matched.length !== 1 ? 's' : ''}
+          </span>
+        </div>
+
+        {/* Seletor de data */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Calendar size={11} color={C.textMuted} />
+          <span style={{ fontSize: 11, color: C.textMuted }}>Data do log:</span>
+          <input
+            type="date"
+            value={dataLog}
+            max={todayStr()}
+            onChange={e => handleChangeDate(e.target.value)}
+            style={{
+              background: 'rgba(255,255,255,0.06)', border: `1px solid ${C.border}`,
+              borderRadius: 6, color: C.text, padding: '3px 7px', fontSize: 11,
+              outline: 'none', cursor: 'pointer',
+            }}
+          />
+        </div>
+
+        {/* Lista de tutores */}
+        {matched.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: C.textMuted, letterSpacing: .6, textTransform: 'uppercase' }}>Tutores</span>
+              {pendentes.length > 0 && (
+                <button onClick={handleToggleAll} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.primaryBright, fontSize: 10, padding: 0, fontWeight: 600 }}>
+                  {allSel ? 'Desmarcar todos' : 'Marcar todos'}
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto' }}>
+              {matched.map(({ tutor, jaTemData, naoAplica }) => {
+                const sel = selecionados.has(tutor.id)
+                const bloqueado = jaTemData || naoAplica
+                return (
+                  <div
+                    key={tutor.id}
+                    onClick={() => !bloqueado && handleToggleTutor(tutor.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '5px 8px', borderRadius: 7,
+                      cursor: bloqueado ? 'default' : 'pointer',
+                      opacity: bloqueado ? 0.55 : 1,
+                      background: jaTemData ? 'rgba(34,197,94,0.07)' : sel ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${jaTemData ? '#22c55e22' : sel ? C.primaryBright + '44' : C.border + '55'}`,
+                      transition: 'background .12s, border-color .12s',
+                    }}
+                  >
+                    <div style={{
+                      width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                      background: jaTemData ? '#22c55e' : sel ? C.primaryBright : 'transparent',
+                      border: `2px solid ${jaTemData ? '#22c55e' : sel ? C.primaryBright : C.border}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .12s',
+                    }}>
+                      {(jaTemData || sel) && <Check size={8} color="#fff" />}
+                    </div>
+                    <span style={{ fontSize: 12, color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tutor.nick}</span>
+                    <span style={{ fontSize: 10, color: C.textMuted, flexShrink: 0 }}>{tutor.cargo}</span>
+                    {jaTemData  && <span style={{ fontSize: 9, color: '#22c55e', fontWeight: 700, flexShrink: 0 }}>✓ ok</span>}
+                    {naoAplica && !jaTemData && <span style={{ fontSize: 9, color: C.textMuted, flexShrink: 0 }}>n/a</span>}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Não cadastrados (collapsible) */}
+        {unmatched.length > 0 && (
+          <details style={{ fontSize: 11 }}>
+            <summary style={{ cursor: 'pointer', color: C.textSoft, userSelect: 'none', fontSize: 11 }}>
+              {unmatched.length} não cadastrado{unmatched.length !== 1 ? 's' : ''} no log
+            </summary>
+            <div style={{ marginTop: 5, color: C.textMuted, lineHeight: 1.7, fontSize: 10 }}>
+              {unmatched.join(' · ')}
+            </div>
+          </details>
+        )}
+
+        {matched.length === 0 && (
+          <div style={{ color: C.textMuted, fontSize: 11, textAlign: 'center', padding: '6px 0' }}>
+            Nenhum tutor cadastrado encontrado neste log.
+          </div>
+        )}
+
+        {/* Aviso atividade automática desligada */}
+        {!_cfg.atividadeAutomatica && (
+          <div style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.2)', borderRadius: 6, padding: '5px 8px' }}>
+            Atividade Automática desativada — presenças serão salvas mas não afetarão o cálculo de atividade.
+          </div>
+        )}
+
+        {/* Botão confirmar */}
+        <button
+          onClick={handleConfirmLog}
+          disabled={selecionados.size === 0}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            width: '100%', padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+            background: selecionados.size === 0 ? 'rgba(255,255,255,0.05)' : `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`,
+            border: `1px solid ${selecionados.size === 0 ? C.border : C.primaryBright + '55'}`,
+            color: selecionados.size === 0 ? C.textMuted : C.text,
+            cursor: selecionados.size === 0 ? 'not-allowed' : 'pointer',
+            transition: 'all .15s',
+          }}
+        >
+          <Check size={12} />
+          {selecionados.size === 0
+            ? 'Nenhuma presença para registrar'
+            : `Registrar ${selecionados.size} presença${selecionados.size !== 1 ? 's' : ''} em ${dataLog}`}
+        </button>
+      </div>
+    )
+  }
+
   return (
     <>
       {/* Painel de chat */}
       {open && (
         <div style={{
-          position: 'fixed', bottom: 84, right: 24, width: 360, zIndex: 1000,
+          position: 'fixed', bottom: 84, right: 24, width: 380, zIndex: 1000,
           background: '#0d0f1f', border: `1px solid ${C.border}`,
           borderRadius: 18, boxShadow: '0 24px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(99,102,241,0.15)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -5628,7 +5669,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Assistente Rubinot</div>
-              <div style={{ fontSize: 10, color: C.textMuted }}>comandos em linguagem natural</div>
+              <div style={{ fontSize: 10, color: C.textMuted }}>comandos · cole um log do canal para registrar presenças</div>
             </div>
             <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 4, display: 'flex' }}>
               <X size={15} />
@@ -5636,30 +5677,35 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
           </div>
 
           {/* Mensagens */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 8px', display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 340, minHeight: 200 }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 8px', display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 400, minHeight: 200 }}>
             {msgs.map((m, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                <div style={{
-                  maxWidth: '85%', padding: '9px 13px', borderRadius: m.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-                  background: m.role === 'user'
-                    ? `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`
-                    : m.error ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.05)',
-                  border: m.role === 'ai' ? `1px solid ${m.error ? 'rgba(239,68,68,0.3)' : C.border}` : 'none',
-                  fontSize: 13, color: m.error ? '#f87171' : C.text, lineHeight: 1.5,
-                }}>
-                  {m.text}
-                  {m.acoes > 0 && (
-                    <div style={{ fontSize: 10, color: '#34d399', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <Check size={10} /> {m.acoes} ação{m.acoes > 1 ? 'ões' : ''} executada{m.acoes > 1 ? 's' : ''}
-                    </div>
-                  )}
-                  {m.avisos?.length > 0 && m.avisos.map((av, i) => (
-                    <div key={i} style={{ fontSize: 11, color: C.gold, marginTop: 4, display: 'flex', alignItems: 'flex-start', gap: 5 }}>
-                      <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} /> {av}
-                    </div>
-                  ))}
+              m.role === 'log-preview' ? (
+                <div key={i}>{renderLogPreview()}</div>
+              ) : (
+                <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                  <div style={{
+                    maxWidth: '85%', padding: '9px 13px',
+                    borderRadius: m.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                    background: m.role === 'user'
+                      ? `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`
+                      : m.error ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.05)',
+                    border: m.role === 'ai' ? `1px solid ${m.error ? 'rgba(239,68,68,0.3)' : C.border}` : 'none',
+                    fontSize: 13, color: m.error ? '#f87171' : C.text, lineHeight: 1.5,
+                  }}>
+                    {m.text}
+                    {m.acoes > 0 && (
+                      <div style={{ fontSize: 10, color: '#34d399', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Check size={10} /> {m.acoes} ação{m.acoes > 1 ? 'ões' : ''} executada{m.acoes > 1 ? 's' : ''}
+                      </div>
+                    )}
+                    {m.avisos?.length > 0 && m.avisos.map((av, j) => (
+                      <div key={j} style={{ fontSize: 11, color: C.gold, marginTop: 4, display: 'flex', alignItems: 'flex-start', gap: 5 }}>
+                        <AlertTriangle size={11} style={{ flexShrink: 0, marginTop: 1 }} /> {av}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )
             ))}
             {loading && (
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
@@ -5674,20 +5720,25 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
           </div>
 
           {/* Input */}
-          <div style={{ padding: '10px 12px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
+          <div style={{ padding: '10px 12px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <textarea
               ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
-              placeholder="Ex: adiciona presença hoje pro Campin"
-              style={{ ...inputBase, flex: 1, fontSize: 12, padding: '8px 12px', borderRadius: 10 }}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+              placeholder={'Ex: adiciona presença hoje pro Campin\nOu cole um log do canal de suporte…'}
+              rows={input.includes('\n') || input.length > 80 ? Math.min(5, input.split('\n').length + 1) : 1}
+              style={{
+                ...inputBase, flex: 1, fontSize: 12, padding: '8px 12px', borderRadius: 10,
+                resize: 'none', lineHeight: 1.45, overflow: 'hidden',
+                fontFamily: input.match(/^\d{2}:\d{2}:\d{2}/) ? 'monospace' : 'inherit',
+              }}
             />
             <button
               onClick={send}
               disabled={!input.trim() || loading}
               style={{
-                ...btn('primary'), padding: '8px 10px', borderRadius: 10,
+                ...btn('primary'), padding: '8px 10px', borderRadius: 10, flexShrink: 0,
                 opacity: (!input.trim() || loading) ? 0.45 : 1,
                 background: `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`,
               }}
@@ -5700,10 +5751,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
 
       {/* Overlay para fechar clicando fora */}
       {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={{ position: 'fixed', inset: 0, zIndex: 999 }}
-        />
+        <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 999 }} />
       )}
 
       {/* Botão flutuante */}
@@ -5719,20 +5767,10 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
           transition: 'all .2s',
         }}
       >
-        <div style={{
-          position: 'absolute',
-          transition: 'transform .22s ease, opacity .18s ease',
-          transform: open ? 'rotate(90deg) scale(0.7)' : 'rotate(0deg) scale(1)',
-          opacity: open ? 0 : 1,
-        }}>
+        <div style={{ position: 'absolute', transition: 'transform .22s ease, opacity .18s ease', transform: open ? 'rotate(90deg) scale(0.7)' : 'rotate(0deg) scale(1)', opacity: open ? 0 : 1 }}>
           <Bot size={22} color="#fff" />
         </div>
-        <div style={{
-          position: 'absolute',
-          transition: 'transform .22s ease, opacity .18s ease',
-          transform: open ? 'rotate(0deg) scale(1)' : 'rotate(-90deg) scale(0.7)',
-          opacity: open ? 1 : 0,
-        }}>
+        <div style={{ position: 'absolute', transition: 'transform .22s ease, opacity .18s ease', transform: open ? 'rotate(0deg) scale(1)' : 'rotate(-90deg) scale(0.7)', opacity: open ? 1 : 0 }}>
           <X size={20} color="#fff" />
         </div>
       </button>
