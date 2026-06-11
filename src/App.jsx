@@ -20,7 +20,7 @@ import {
   Cloud, Leaf, Key, Ghost, Wand2, Axe, Sword, Crosshair,
   Skull, Fish, Flower, Castle, Dices, Scroll, Infinity,
   Hexagon, Triangle, Diamond, Layers, Radio, Telescope,
-  Binoculars, Microscope, Sunrise, Tornado, Lightbulb,
+  Binoculars, Microscope, Sunrise, Tornado, Lightbulb, Paperclip,
 } from 'lucide-react'
 
 const mkRoman = r => ({ size = 16, color = 'currentColor' }) => (
@@ -5350,8 +5350,9 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
   const [msgs, setMsgs]       = useState([
     { role: 'ai', text: 'Oi! Pode me pedir pra adicionar presenças, consultar dados ou qualquer coisa sobre a equipe. Ex: "adiciona presença hoje pro Campin"' }
   ])
-  const bottomRef = useRef(null)
-  const inputRef  = useRef(null)
+  const bottomRef   = useRef(null)
+  const inputRef    = useRef(null)
+  const fileInputRef = useRef(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
   useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 100) }, [open])
@@ -5473,6 +5474,31 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
       { role: 'user', text: 'O que você pode fazer?' },
       { role: 'ai', text: `Posso ajudar com:\n\n• Registrar presença — "adiciona presença hoje pro Campin"\n• Remover presença — "remove presença de ontem do Zek"\n• Presença em lote — "adiciona presença hoje pra todos"\n• Ausência — "coloca Campin de férias de 15/06 a 22/06"\n• Mudar cargo — "efetiva o Zek"\n• Observação — "adiciona obs no Campin: pendência de recrutamento"\n• Log do canal — cole o histórico do chat de suporte e eu detecto quem estava ativo automaticamente` },
     ])
+  }
+
+  // ── Anexo de arquivo .txt ─────────────────────────────────────────────────────
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target.result || ''
+      const logLineCount = (text.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
+      if (logLineCount >= 3) {
+        const p = buildPreview(text, todayStr())
+        setPreview(p)
+        const jogadores = p.matched.length + p.unmatched.length
+        setMsgs(prev => [...prev,
+          { role: 'user', text: `📎 ${file.name} (${p.linhas} linhas · ${jogadores} jogador${jogadores !== 1 ? 'es' : ''} único${jogadores !== 1 ? 's' : ''})` },
+          { role: 'log-preview' },
+        ])
+      } else {
+        setInput(text.slice(0, 2000))
+        setTimeout(() => inputRef.current?.focus(), 50)
+      }
+    }
+    reader.readAsText(file, 'UTF-8')
   }
 
   // ── send ──────────────────────────────────────────────────────────────────────
@@ -5742,6 +5768,28 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
 
           {/* Input */}
           <div style={{ padding: '10px 12px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt"
+              style={{ display: 'none' }}
+              onChange={handleFileSelect}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading}
+              title="Anexar log do canal (.txt) — abre de C:\Program Files (x86)\RubinOT 2.0\bin"
+              style={{
+                background: 'rgba(255,255,255,0.04)', border: `1px solid ${C.border}`,
+                borderRadius: 10, padding: '8px 9px', cursor: loading ? 'not-allowed' : 'pointer',
+                color: C.textMuted, display: 'flex', alignItems: 'center', flexShrink: 0,
+                opacity: loading ? 0.4 : 1, transition: 'color .15s, border-color .15s',
+              }}
+              onMouseEnter={e => { if (!loading) { e.currentTarget.style.color = C.primaryBright; e.currentTarget.style.borderColor = C.primaryBright + '55' } }}
+              onMouseLeave={e => { e.currentTarget.style.color = C.textMuted; e.currentTarget.style.borderColor = C.border }}
+            >
+              <Paperclip size={14} />
+            </button>
             <textarea
               ref={inputRef}
               value={input}
