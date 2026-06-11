@@ -2042,6 +2042,174 @@ const FILTER_TABS = [
   { key: 'inativos', label: 'Inativos / Desligados' },
 ]
 
+// ── ChatPresencaModal ─────────────────────────────────────────────────────────
+function parseChatLog(text) {
+  // Formato: HH:MM:SS PlayerName [level]: message
+  const re = /^\d{2}:\d{2}:\d{2}\s+(.+?)\s+\[\d+\]:/gm
+  const nomes = new Set()
+  let m
+  while ((m = re.exec(text)) !== null) {
+    const nome = m[1].trim()
+    if (nome) nomes.add(nome)
+  }
+  return [...nomes]
+}
+
+function ChatPresencaModal({ open, onClose, tutores, onConfirm }) {
+  const [log, setLog]                       = useState('')
+  const [encontrados, setEncontrados]       = useState([])
+  const [naoEncontrados, setNaoEncontrados] = useState([])
+  const [selecionados, setSelecionados]     = useState(new Set())
+  const [dataLog, setDataLog]               = useState(todayStr())
+  const [fase, setFase]                     = useState('input')
+
+  useEffect(() => {
+    if (!open) {
+      setLog(''); setEncontrados([]); setNaoEncontrados([])
+      setSelecionados(new Set()); setDataLog(todayStr()); setFase('input')
+    }
+  }, [open])
+
+  const handleAnalisar = () => {
+    if (!log.trim() || !dataLog) return
+    const nomes = parseChatLog(log)
+    const matched = [], unmatched = []
+    for (const nome of nomes) {
+      const tutor = tutores.find(t => t.nick.toLowerCase() === nome.toLowerCase())
+      if (tutor) {
+        const jaTemData = (tutor.presencas || []).includes(dataLog)
+        // Se presencaApenasEmTeste está ativo, só Em Teste têm presença contabilizada
+        const naoAplica = _cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste'
+        matched.push({ tutor, jaTemData, naoAplica })
+      } else {
+        unmatched.push(nome)
+      }
+    }
+    // Pré-seleciona quem ainda não tem presença na data e tem presença aplicável
+    setSelecionados(new Set(matched.filter(m => !m.jaTemData && !m.naoAplica).map(m => m.tutor.id)))
+    setEncontrados(matched)
+    setNaoEncontrados(unmatched)
+    setFase('preview')
+  }
+
+  const handleConfirm = () => { onConfirm({ ids: [...selecionados], data: dataLog }); onClose() }
+
+  const toggleAll = () => {
+    const pendentes = encontrados.filter(m => !m.jaTemData && !m.naoAplica)
+    setSelecionados(selecionados.size === pendentes.length ? new Set() : new Set(pendentes.map(m => m.tutor.id)))
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Presença via Chat" icon={MessageSquare}>
+      {fase === 'input' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {!_cfg.atividadeAutomatica && (
+            <div style={{ background: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.3)', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#f97316' }}>
+              Atenção: "Atividade Automática" está desativada. As presenças serão registradas, mas não afetarão o cálculo de atividade.
+            </div>
+          )}
+          <div style={{ fontSize: 13, color: C.textSoft }}>
+            Cole o histórico do canal de suporte. O sistema extrai os nomes automaticamente e registra presença apenas para tutores cadastrados, sem duplicatas.
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: C.textSoft, display: 'block', marginBottom: 6 }}>Data do log</label>
+            <input
+              type="date"
+              value={dataLog}
+              max={todayStr()}
+              onChange={e => setDataLog(e.target.value)}
+              style={{ ...inputBase, width: 'auto' }}
+            />
+          </div>
+          <textarea
+            value={log}
+            onChange={e => setLog(e.target.value)}
+            placeholder={'10:03:53 Itachi Hiraishin [465]: entrou a double?\n10:04:17 Lopez Menino [611]: double skill ja está ativo??'}
+            style={{ ...inputBase, minHeight: 200, resize: 'vertical', fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5 }}
+          />
+          <button style={btn('primary')} disabled={!log.trim() || !dataLog} onClick={handleAnalisar}>
+            <Search size={14} /> Analisar Log
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 13, color: C.textSoft }}>
+            <strong style={{ color: C.text }}>{encontrados.length}</strong> tutor{encontrados.length !== 1 ? 'es' : ''} encontrado{encontrados.length !== 1 ? 's' : ''} · data: <strong style={{ color: C.primaryBright }}>{dataLog}</strong>
+            {naoEncontrados.length > 0 && <> · <strong style={{ color: C.textMuted }}>{naoEncontrados.length}</strong> nome{naoEncontrados.length !== 1 ? 's' : ''} não cadastrado{naoEncontrados.length !== 1 ? 's' : ''}.</>}
+          </div>
+
+          {encontrados.length > 0 && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: C.textSoft, letterSpacing: .5 }}>TUTORES ENCONTRADOS</span>
+                <button style={btn('ghost', 'sm')} onClick={toggleAll}>
+                  {selecionados.size > 0 ? 'Desmarcar todos' : 'Marcar todos'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+                {encontrados.map(({ tutor, jaTemData, naoAplica }) => {
+                  const sel = selecionados.has(tutor.id)
+                  const bloqueado = jaTemData || naoAplica
+                  return (
+                    <div
+                      key={tutor.id}
+                      onClick={() => {
+                        if (bloqueado) return
+                        setSelecionados(prev => { const n = new Set(prev); sel ? n.delete(tutor.id) : n.add(tutor.id); return n })
+                      }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8,
+                        cursor: bloqueado ? 'default' : 'pointer', opacity: bloqueado ? 0.6 : 1,
+                        background: jaTemData ? 'rgba(34,197,94,0.06)' : sel ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
+                        border: `1px solid ${jaTemData ? '#22c55e30' : sel ? C.primaryBright + '50' : C.border}`,
+                      }}
+                    >
+                      <div style={{
+                        width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                        background: jaTemData ? '#22c55e' : sel ? C.primaryBright : 'transparent',
+                        border: `2px solid ${jaTemData ? '#22c55e' : sel ? C.primaryBright : C.border}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {(jaTemData || sel) && <Check size={10} color="#fff" />}
+                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: C.text, flex: 1 }}>{tutor.nick}</span>
+                      <span style={{ fontSize: 11, color: C.textMuted }}>{tutor.cargo}</span>
+                      {jaTemData && <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600 }}>já registrado</span>}
+                      {naoAplica && !jaTemData && <span style={{ fontSize: 10, color: C.textMuted }}>presença n/a</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
+
+          {naoEncontrados.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: C.textSoft, letterSpacing: .5 }}>NÃO CADASTRADOS ({naoEncontrados.length})</span>
+              <div style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.8, maxHeight: 80, overflowY: 'auto', padding: '6px 10px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, border: `1px solid ${C.border}` }}>
+                {naoEncontrados.join(' · ')}
+              </div>
+            </div>
+          )}
+
+          {encontrados.length === 0 && (
+            <div style={{ textAlign: 'center', color: C.textMuted, fontSize: 13, padding: '24px 0' }}>
+              Nenhum tutor cadastrado encontrado no log.
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button style={btn('ghost')} onClick={() => setFase('input')}><X size={14} /> Voltar</button>
+            <button style={{ ...btn('primary'), flex: 1 }} disabled={selecionados.size === 0} onClick={handleConfirm}>
+              <Check size={14} /> Registrar {selecionados.size} presença{selecionados.size !== 1 ? 's' : ''} em {dataLog}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 // ── ImportModal ───────────────────────────────────────────────────────────────
 function parseExcelDate(serial) {
   if (!serial || typeof serial !== 'number') return ''
@@ -2305,8 +2473,9 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
   const [editId, setEditId]         = useState(null)
   const [ausenciaId, setAusenciaId] = useState(null)
   const [obsId, setObsId]           = useState(null)
-  const [importOpen, setImportOpen] = useState(false)
-  const [exportOpen, setExportOpen] = useState(false)
+  const [importOpen, setImportOpen]           = useState(false)
+  const [exportOpen, setExportOpen]           = useState(false)
+  const [chatPresencaOpen, setChatPresencaOpen] = useState(false)
   const [profileId, setProfileId]   = useState(null)
   const [search, setSearch]         = useState('')
   const [viewMode, setViewMode]     = useState('list')
@@ -2332,6 +2501,15 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
         return { ...t, obs: text, obsHistorico: [...(t.obsHistorico || []), entrada] }
       }
       return { ...t, obs: text }
+    }))
+  }
+  const handleChatPresenca = ({ ids, data }) => {
+    if (!ids.length) return
+    if (pendingAuditRef) pendingAuditRef.current = { action: 'presenca_add', nick: `${ids.length} via chat`, details: { data, count: ids.length } }
+    setTutores(prev => prev.map(t => {
+      if (!ids.includes(t.id)) return t
+      const presencas = t.presencas || []
+      return { ...t, presencas: [...new Set([...presencas, data])], atividadeCalculada: null, apto: null }
     }))
   }
   const handlePresenca    = (id, add) => {
@@ -2428,6 +2606,9 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
+        <button style={btn('subtle')} onClick={() => setChatPresencaOpen(true)}>
+          <MessageSquare size={15} /> Presença via Chat
+        </button>
         <button style={btn('subtle')} onClick={() => setImportOpen(true)}>
           <ClipboardList size={15} /> Importar
         </button>
@@ -2530,6 +2711,13 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
       <Modal open={modalOpen} onClose={handleClose} title={editId !== null ? 'Editar Tutor' : 'Cadastrar Novo Tutor'} icon={UserPlus}>
         <TutorForm tutores={tutores} setTutores={setTutores} editId={editId} onDone={handleClose} pendingAuditRef={pendingAuditRef} />
       </Modal>
+
+      <ChatPresencaModal
+        open={chatPresencaOpen}
+        onClose={() => setChatPresencaOpen(false)}
+        tutores={tutores}
+        onConfirm={handleChatPresenca}
+      />
 
       <ImportModal
         open={importOpen}
