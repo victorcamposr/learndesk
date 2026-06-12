@@ -785,6 +785,27 @@ app.post('/api/settings', requireAuth, requireAdmin, requireServerAccess, (req, 
   res.json({ ok: true })
 })
 
+app.get('/api/replies', requireAuth, requireServerAccess, (req, res) => {
+  res.json(getKV(serverKey(req, 'replies')) || {})
+})
+
+app.post('/api/replies', requireAuth, requireServerAccess, (req, res) => {
+  const { replies } = req.body || {}
+  if (!replies || typeof replies !== 'object' || Array.isArray(replies))
+    return res.status(400).json({ error: 'Dados inválidos' })
+  const existing = getKV(serverKey(req, 'replies')) || {}
+  for (const [nick, months] of Object.entries(replies)) {
+    if (typeof months !== 'object' || Array.isArray(months)) continue
+    if (!existing[nick]) existing[nick] = {}
+    for (const [month, count] of Object.entries(months)) {
+      if (typeof count === 'number' && /^\d{4}-\d{2}$/.test(month))
+        existing[nick][month] = (existing[nick][month] || 0) + count
+    }
+  }
+  setKV(serverKey(req, 'replies'), existing)
+  res.json({ ok: true })
+})
+
 app.get('/api/config/apikey', requireAuth, (_req, res) => res.json({ configured: !!(getKV('gemini_api_key') || process.env.GEMINI_API_KEY) }))
 
 app.post('/api/config/apikey', requireAuth, requireAdmin, (req, res) => {

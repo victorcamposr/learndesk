@@ -2347,6 +2347,7 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
   const [importOpen, setImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [profileId, setProfileId]   = useState(null)
+  const [repliesData, setRepliesData] = useState({})
   const [search, setSearch]         = useState('')
   const [viewMode, setViewMode]     = useState('list')
   const [filterTab, setFilterTab]   = useState('ativos')
@@ -2609,6 +2610,7 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
         onClose={() => setProfileId(null)}
         onDeleteObsHistorico={handleDeleteObsHistorico}
         onDeleteAusenciaHistorico={(tutorId, id) => handleAusencia(tutorId, null, id, true)}
+        repliesData={repliesData}
       />
     </div>
   )
@@ -4708,10 +4710,11 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
 }
 
 // ── TutorProfileModal ─────────────────────────────────────────────────────────
-function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDeleteAusenciaHistorico }) {
+function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDeleteAusenciaHistorico, repliesData = {} }) {
   const [copied, setCopied] = useState(false)
   const [showHistorico, setShowHistorico] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null) // { type: 'obs'|'ausencia', id }
+  const [selectedMonth, setSelectedMonth] = useState(null)
 
   const handleCopy = () => {
     const texto = `ADICIONAR CARGOS/ REMOVER CARGOS\n\nDiscord: ${tutor.discord || ''}\nIn-game: ${tutor.nick}`
@@ -4721,6 +4724,7 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
     })
   }
   const currentMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })()
+  const activeMonth = selectedMonth || currentMonthKey
 
   const meses = useMemo(() => {
     const hoje = new Date()
@@ -4735,6 +4739,8 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
 
   const usaPresenca = !(_cfg.presencaApenasEmTeste && tutor?.cargo !== 'Em Teste')
   const startMonth  = tutor?.dataInicio?.slice(0, 7) || null
+  const nickLowForReplies = tutor?.nick?.toLowerCase()
+  const repliesCount = repliesData?.[nickLowForReplies]?.[activeMonth] || 0
 
   const ATIV_NUM = { 'Alta': 4, 'Moderada': 3, 'Baixa': 2, 'Não Definida': 1 }
 
@@ -4742,8 +4748,10 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
     const mesesVisiveis = startMonth ? meses.filter(m => m.key >= startMonth) : meses
     if (usaPresenca) {
       return mesesVisiveis.map(m => ({
+        key: m.key,
         name: m.label,
         presencas: (tutor?.presencas || []).filter(d => d.startsWith(m.key)).length,
+        replies: repliesData?.[nickLowForReplies]?.[m.key] || 0,
       }))
     }
     return mesesVisiveis.map(m => {
@@ -4752,24 +4760,24 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
       const atv = m.key === currentMonthKey
         ? (tutor?.atividade || 'Não Definida')
         : (entrada?.atividade || null)
-      return { name: m.label, valor: atv ? (ATIV_NUM[atv] || 0) : 0, atividade: atv || 'Sem dados' }
+      return { key: m.key, name: m.label, valor: atv ? (ATIV_NUM[atv] || 0) : 0, atividade: atv || 'Sem dados' }
     })
-  }, [meses, tutor, usaPresenca, startMonth])
+  }, [meses, tutor, usaPresenca, startMonth, repliesData, nickLowForReplies])
 
   const currentMonthInfo = useMemo(() => {
     if (!tutor) return null
-    const hoje      = new Date()
-    const totalDays = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
-    const marked    = new Set((tutor.presencas || []).filter(d => d.startsWith(currentMonthKey)))
+    const [yr, mo] = activeMonth.split('-').map(Number)
+    const totalDays = new Date(yr, mo, 0).getDate()
+    const marked    = new Set((tutor.presencas || []).filter(d => d.startsWith(activeMonth)))
     const days = Array.from({ length: totalDays }, (_, i) => {
       const day  = String(i + 1).padStart(2, '0')
-      const date = `${currentMonthKey}-${day}`
+      const date = `${activeMonth}-${day}`
       return { date, day: i + 1, marked: marked.has(date), future: date > todayStr() }
     })
     return { days, count: marked.size, totalDays }
-  }, [tutor, currentMonthKey])
+  }, [tutor, activeMonth])
 
-  useEffect(() => { if (!open) { setShowHistorico(false); setConfirmDelete(null) } }, [open])
+  useEffect(() => { if (!open) { setShowHistorico(false); setConfirmDelete(null); setSelectedMonth(null) } }, [open])
 
   if (!tutor) return null
 
@@ -4781,6 +4789,8 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
   const accentColor    = diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
   const count          = currentMonthInfo?.count || 0
   const pct            = currentMonthInfo ? Math.round((count / currentMonthInfo.totalDays) * 100) : 0
+  const [amY, amM]     = activeMonth.split('-').map(Number)
+  const activeMonthLabel = new Date(amY, amM - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
 
   const infoRow = (Icon, label, value, color) => value ? (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4856,9 +4866,14 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
               <CalendarCheck size={12} />
-              Presenças — {new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
-              <span style={{ marginLeft: 'auto', color: C.textSoft, fontWeight: 400 }}>
+              Presenças — {activeMonthLabel}
+              <span style={{ marginLeft: 'auto', color: C.textSoft, fontWeight: 400, display: 'flex', alignItems: 'center', gap: 8 }}>
                 {count} / {currentMonthInfo.totalDays} dias · {pct}%
+                {repliesCount > 0 && (
+                  <span style={{ background: 'rgba(99,102,241,0.12)', border: `1px solid ${C.primaryBright}30`, borderRadius: 5, padding: '1px 7px', fontSize: 10, color: C.primaryBright, fontWeight: 600 }}>
+                    {repliesCount} replies
+                  </span>
+                )}
               </span>
             </div>
             {/* Barra de progresso */}
@@ -4869,14 +4884,16 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
                 boxShadow: `0 0 8px ${atividadeColor}60`,
               }} />
             </div>
-            {/* Próximo nível */}
-            <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              {(() => {
-                if (count < _cfg.baixaMax + 1)    return <><span style={{ color: ATIVIDADE_COLORS.Baixa }}>●</span> {_cfg.baixaMax + 1 - count}d para Moderada</>
-                if (count < _cfg.moderadaMax + 1)  return <><span style={{ color: ATIVIDADE_COLORS.Moderada }}>●</span> {_cfg.moderadaMax + 1 - count}d para Alta</>
-                return <><span style={{ color: ATIVIDADE_COLORS.Alta }}>●</span> Atividade Alta atingida!</>
-              })()}
-            </div>
+            {/* Próximo nível — só no mês atual */}
+            {activeMonth === currentMonthKey && (
+              <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {(() => {
+                  if (count < _cfg.baixaMax + 1)    return <><span style={{ color: ATIVIDADE_COLORS.Baixa }}>●</span> {_cfg.baixaMax + 1 - count}d para Moderada</>
+                  if (count < _cfg.moderadaMax + 1)  return <><span style={{ color: ATIVIDADE_COLORS.Moderada }}>●</span> {_cfg.moderadaMax + 1 - count}d para Alta</>
+                  return <><span style={{ color: ATIVIDADE_COLORS.Alta }}>●</span> Atividade Alta atingida!</>
+                })()}
+              </div>
+            )}
             {/* Calendário */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {currentMonthInfo.days.map(d => (
@@ -4905,7 +4922,12 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
             {usaPresenca ? 'Histórico — últimos 6 meses' : 'Atividade — últimos 6 meses'}
           </div>
           <ResponsiveContainer width="100%" height={150}>
-            <BarChart data={chartData} margin={{ top: 4, right: 8, left: -24, bottom: 4 }}>
+            <BarChart
+              data={chartData}
+              margin={{ top: 4, right: 8, left: -24, bottom: 4 }}
+              style={{ cursor: 'pointer' }}
+              onClick={data => { if (data?.activePayload?.[0]?.payload?.key) setSelectedMonth(data.activePayload[0].payload.key) }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="name" tick={{ fill: C.textSoft, fontSize: 10 }} />
               {usaPresenca
@@ -4921,14 +4943,16 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
                                 : c <= _cfg.baixaMax    ? ATIVIDADE_COLORS.Baixa
                                 : c <= _cfg.moderadaMax ? ATIVIDADE_COLORS.Moderada
                                 : ATIVIDADE_COLORS.Alta
-                    return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
+                    const isActive = d.key === activeMonth
+                    return <Cell key={i} fill={isActive ? color : `${color}70`} strokeWidth={isActive ? 2 : 0} stroke={isActive ? color : 'none'} />
                   })}
                 </Bar>
               ) : (
                 <Bar dataKey="valor" name="Atividade" radius={[4, 4, 0, 0]}>
                   {chartData.map((d, i) => {
                     const color = ATIVIDADE_COLORS[d.atividade] || C.textMuted
-                    return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
+                    const isActive = d.key === activeMonth
+                    return <Cell key={i} fill={isActive ? color : `${color}70`} strokeWidth={isActive ? 2 : 0} stroke={isActive ? color : 'none'} />
                   })}
                 </Bar>
               )}
@@ -5524,6 +5548,21 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     }))].sort()
     const fmtDate = d => `${d.slice(8)}/${d.slice(5,7)}`
     const datesDesc = allNovas.map(fmtDate).join(' e ')
+    // Contabiliza replies por tutor/mês e envia ao backend
+    const repliesPayload = {}
+    for (const id of ids) {
+      const mi = preview.matched.find(m => m.tutor.id === id)
+      if (!mi) continue
+      const nickLow = mi.tutor.nick.toLowerCase()
+      const msgs = preview.mensagensPorNick?.[nickLow] || []
+      for (const msg of msgs) {
+        const month = (msg.depois && preview.data2) ? preview.data2.slice(0, 7) : dataLog.slice(0, 7)
+        if (!repliesPayload[nickLow]) repliesPayload[nickLow] = {}
+        repliesPayload[nickLow][month] = (repliesPayload[nickLow][month] || 0) + 1
+      }
+    }
+    if (Object.keys(repliesPayload).length > 0)
+      apiFetch('/api/replies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ replies: repliesPayload }) })
     setPreview(p => ({ ...p, confirmed: true }))
     setLogMsgModal(null)
     showToast(`${count} presença${count > 1 ? 's' : ''} registrada${count > 1 ? 's' : ''} em ${datesDesc}`, 'success')
@@ -5565,7 +5604,8 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     reader.onerror = () => showToast('Erro ao ler o arquivo.', 'error')
     reader.onload = (ev) => {
       try {
-        const text = (ev.target.result || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        const raw  = new TextDecoder('windows-1252').decode(ev.target.result)
+        const text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
         const logLineCount = (text.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
         if (logLineCount >= 3) {
           const p = buildPreview(text, detectLogDate(text))
@@ -5587,7 +5627,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
         console.error('[FILE-IMPORT]', err)
       }
     }
-    reader.readAsText(file, 'UTF-8')
+    reader.readAsArrayBuffer(file)
   }
 
   // ── send ──────────────────────────────────────────────────────────────────────
@@ -6696,13 +6736,15 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     Promise.all([
       apiFetch('/api/tutores').then(r => r.json()),
       apiFetch('/api/settings').then(r => r.json()).catch(() => ({})),
-    ]).then(([tutoresData, settingsData]) => {
+      apiFetch('/api/replies').then(r => r.json()).catch(() => ({})),
+    ]).then(([tutoresData, settingsData, repliesRaw]) => {
       setTutores(Array.isArray(tutoresData) ? tutoresData : [])
       if (settingsData && !settingsData.error && Object.keys(settingsData).length > 0) {
         const merged = { ...DEFAULT_CFG, ...settingsData }
         _cfg = merged
         setCfg(merged)
       }
+      if (repliesRaw && !repliesRaw.error) setRepliesData(repliesRaw)
     }).catch(() => setTutores([]))
       .finally(() => { pendingAuditRef.current = { skip: true }; setDataLoaded(true) })
   }, [])
