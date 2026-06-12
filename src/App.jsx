@@ -5446,9 +5446,10 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
               ...(beforeMidnight.has(nickLow) ? [data]  : []),
               ...(afterMidnight.has(nickLow)  ? [data2 ?? data] : []),
             ]
-        const jaTemData = datas.length > 0 && datas.every(d => (tutor.presencas || []).includes(d))
-        const naoAplica = _cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste'
-        matched.push({ tutor, jaTemData, naoAplica, datas })
+        const datasNovas = datas.filter(d => !(tutor.presencas || []).includes(d))
+        const jaTemData  = datasNovas.length === 0
+        const naoAplica  = _cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste'
+        matched.push({ tutor, jaTemData, naoAplica, datas, datasNovas })
       } else {
         unmatched.push(nome)
       }
@@ -5477,8 +5478,9 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
               ...(preview.beforeMidnight.has(nickLow) ? [newDate]       : []),
               ...(preview.afterMidnight.has(nickLow)  ? [data2 ?? newDate] : []),
             ]
-        const jaTemData = datas.length > 0 && datas.every(d => (m.tutor.presencas || []).includes(d))
-        return { ...m, datas, jaTemData }
+        const datasNovas = datas.filter(d => !(m.tutor.presencas || []).includes(d))
+        const jaTemData  = datasNovas.length === 0
+        return { ...m, datas, datasNovas, jaTemData }
       }),
     }
     updated.selecionados = new Set(updated.matched.filter(m => !m.jaTemData && !m.naoAplica).map(m => m.tutor.id))
@@ -5507,11 +5509,16 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     setTutores(prev => prev.map(t => {
       if (!ids.includes(t.id)) return t
       const matchInfo = preview.matched.find(m => m.tutor.id === t.id)
-      const novasDatas = matchInfo?.datas?.length ? matchInfo.datas : [dataLog]
+      const novasDatas = matchInfo?.datasNovas?.length ? matchInfo.datasNovas : [dataLog]
       return { ...t, presencas: [...new Set([...(t.presencas || []), ...novasDatas])], atividadeCalculada: null, apto: null }
     }))
     const count = ids.length
-    const datesDesc = data2 ? `${dataLog} e ${data2}` : dataLog
+    const allNovas = [...new Set(ids.flatMap(id => {
+      const mi = preview.matched.find(m => m.tutor.id === id)
+      return mi?.datasNovas?.length ? mi.datasNovas : [dataLog]
+    }))].sort()
+    const fmtDate = d => `${d.slice(8)}/${d.slice(5,7)}`
+    const datesDesc = allNovas.map(fmtDate).join(' e ')
     setPreview(p => ({ ...p, confirmed: true }))
     setMsgs(prev => [...prev, {
       role: 'ai',
@@ -5662,7 +5669,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
               )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto' }}>
-              {matched.map(({ tutor, jaTemData, naoAplica, datas = [] }) => {
+              {matched.map(({ tutor, jaTemData, naoAplica, datasNovas = [] }) => {
                 const sel = selecionados.has(tutor.id)
                 const bloqueado = jaTemData || naoAplica
                 return (
@@ -5689,9 +5696,9 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
                     </div>
                     <span style={{ fontSize: 12, color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tutor.nick}</span>
                     <span style={{ fontSize: 10, color: C.textMuted, flexShrink: 0 }}>{tutor.cargo}</span>
-                    {spansMidnight && !jaTemData && !naoAplica && datas.map(d => (
+                    {spansMidnight && !jaTemData && !naoAplica && datasNovas.map(d => (
                       <span key={d} style={{ fontSize: 9, color: C.primaryBright, background: 'rgba(99,102,241,0.12)', border: `1px solid ${C.primaryBright}30`, borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>
-                        {d.slice(5).replace('-', '/')}
+                        {d.slice(8)}/{d.slice(5,7)}
                       </span>
                     ))}
                     {jaTemData  && <span style={{ fontSize: 9, color: '#22c55e', fontWeight: 700, flexShrink: 0 }}>✓ ok</span>}
@@ -5745,7 +5752,13 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
           <Check size={12} />
           {selecionados.size === 0
             ? 'Nenhuma presença para registrar'
-            : `Registrar ${selecionados.size} presença${selecionados.size !== 1 ? 's' : ''} em ${dataLog}${data2 ? ` e ${data2}` : ''}`}
+            : (() => {
+                const pendDates = [...new Set([...selecionados].flatMap(id => {
+                  const mi = matched.find(m => m.tutor.id === id)
+                  return mi?.datasNovas?.length ? mi.datasNovas : [dataLog]
+                }))].sort().map(d => `${d.slice(8)}/${d.slice(5,7)}`).join(' e ')
+                return `Registrar ${selecionados.size} presença${selecionados.size !== 1 ? 's' : ''} em ${pendDates}`
+              })()}
         </button>
       </div>
     )
