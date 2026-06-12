@@ -635,6 +635,14 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
   } else {
     addAuditLog(actor, 'tutores_save', { server, count: cleaned.length })
   }
+  // Safeguard: nunca sobrescrever dados existentes com lista vazia
+  if (cleaned.length === 0) {
+    const existing = getKV(serverKey(req, 'tutores')) || []
+    if (existing.length > 0) {
+      console.warn(`[SAFEGUARD] Bloqueado: tentativa de apagar ${existing.length} tutores em ${serverKey(req, 'tutores')}`)
+      return res.status(400).json({ error: 'Operação bloqueada: lista vazia não pode sobrescrever dados existentes' })
+    }
+  }
   setKV(serverKey(req, 'tutores'), cleaned)
   res.json({ ok: true })
 })

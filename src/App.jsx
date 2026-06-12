@@ -6744,6 +6744,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
       apiFetch('/api/settings').then(r => r.json()).catch(() => ({})),
     ]).then(([tutoresData, settingsData]) => {
       setTutores(Array.isArray(tutoresData) ? tutoresData : [])
+      dataLoadOkRef.current = true
       if (settingsData && !settingsData.error && Object.keys(settingsData).length > 0) {
         const merged = { ...DEFAULT_CFG, ...settingsData }
         _cfg = merged
@@ -6757,8 +6758,10 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
   const saveTimer       = useRef(null)
   const fromPollRef     = useRef(false)
   const pendingAuditRef = useRef(null)
+  const dataLoadOkRef   = useRef(false)
   useEffect(() => {
     if (!dataLoaded) return
+    if (!dataLoadOkRef.current) return  // não salva se o carregamento inicial falhou
     if (fromPollRef.current) { fromPollRef.current = false; return }
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
