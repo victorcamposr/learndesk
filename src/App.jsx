@@ -2060,7 +2060,7 @@ function parseChatLogFull(text) {
   const nomes = new Set()
   const beforeMidnight  = new Set()
   const afterMidnight   = new Set()
-  const mensagensPorNick = new Map()
+  const mensagensPorNick = {}   // objeto simples: nickLow → [{time, text, depois}]
   let crossedMidnight = false
   let prevMinutes = -1
   let m
@@ -2074,9 +2074,8 @@ function parseChatLogFull(text) {
     nomes.add(nick)
     if (crossedMidnight) afterMidnight.add(nickLow)
     else beforeMidnight.add(nickLow)
-    const arr = mensagensPorNick.get(nickLow) || []
-    arr.push({ time: `${m[1]}:${m[2]}`, text: (m[4] || '').trim(), depois: crossedMidnight })
-    mensagensPorNick.set(nickLow, arr)
+    if (!mensagensPorNick[nickLow]) mensagensPorNick[nickLow] = []
+    mensagensPorNick[nickLow].push({ time: `${m[1]}:${m[2]}`, text: (m[4] || '').trim(), depois: crossedMidnight })
     prevMinutes = minutes
   }
   return { nomes, spansMidnight: crossedMidnight, beforeMidnight, afterMidnight, mensagensPorNick }
@@ -5372,6 +5371,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
 
 // ── FloatingChat ──────────────────────────────────────────────────────────────
 function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
+  const showToast = useToast()
   const [open, setOpen]       = useState(false)
   const [input, setInput]     = useState('')
   const [loading, setLoading] = useState(false)
@@ -5526,6 +5526,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     const datesDesc = allNovas.map(fmtDate).join(' e ')
     setPreview(p => ({ ...p, confirmed: true }))
     setLogMsgModal(null)
+    showToast(`${count} presença${count > 1 ? 's' : ''} registrada${count > 1 ? 's' : ''} em ${datesDesc}`, 'success')
     setMsgs(prev => [...prev, {
       role: 'ai',
       text: `${count} presença${count > 1 ? 's' : ''} registrada${count > 1 ? 's' : ''} em ${datesDesc}.`,
@@ -5561,20 +5562,29 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     if (!file) return
     e.target.value = ''
     const reader = new FileReader()
+    reader.onerror = () => showToast('Erro ao ler o arquivo.', 'error')
     reader.onload = (ev) => {
-      const text = ev.target.result || ''
-      const logLineCount = (text.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
-      if (logLineCount >= 3) {
-        const p = buildPreview(text, detectLogDate(text))
-        setPreview(p)
-        const jogadores = p.matched.length + p.unmatched.length
-        setMsgs(prev => [...prev,
-          { role: 'user', text: `📎 ${file.name} (${p.linhas} linhas · ${jogadores} jogador${jogadores !== 1 ? 'es' : ''} único${jogadores !== 1 ? 's' : ''})` },
-          { role: 'log-preview' },
-        ])
-      } else {
-        setInput(text.slice(0, 2000))
-        setTimeout(() => inputRef.current?.focus(), 50)
+      try {
+        const text = (ev.target.result || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        const logLineCount = (text.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
+        if (logLineCount >= 3) {
+          const p = buildPreview(text, detectLogDate(text))
+          setPreview(p)
+          const jogadores = p.matched.length + p.unmatched.length
+          setMsgs(prev => [...prev,
+            { role: 'user', text: `📎 ${file.name} (${p.linhas} linhas · ${jogadores} jogador${jogadores !== 1 ? 'es' : ''} único${jogadores !== 1 ? 's' : ''})` },
+            { role: 'log-preview' },
+          ])
+          showToast(`Log importado — ${jogadores} jogadores detectados`, 'info')
+        } else {
+          if (!text.trim()) { showToast('Arquivo vazio ou formato não reconhecido.', 'warning'); return }
+          setInput(text.slice(0, 2000))
+          setTimeout(() => inputRef.current?.focus(), 50)
+          showToast('Conteúdo carregado no campo de texto.', 'info')
+        }
+      } catch (err) {
+        showToast(`Erro ao processar arquivo: ${err.message}`, 'error')
+        console.error('[FILE-IMPORT]', err)
       }
     }
     reader.readAsText(file, 'UTF-8')
@@ -5589,13 +5599,20 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     // Detecta log de canal: ≥3 linhas no formato "HH:MM:SS Nome [nível]:"
     const logLineCount = (msg.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
     if (logLineCount >= 3) {
-      const p = buildPreview(msg, detectLogDate(msg))
-      setPreview(p)
-      const jogadores = p.matched.length + p.unmatched.length
-      setMsgs(prev => [...prev,
-        { role: 'user', text: `📋 Log do canal (${p.linhas} linhas · ${jogadores} jogador${jogadores !== 1 ? 'es' : ''} único${jogadores !== 1 ? 's' : ''})` },
-        { role: 'log-preview' },
-      ])
+      try {
+        const safeMsg = msg.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        const p = buildPreview(safeMsg, detectLogDate(safeMsg))
+        setPreview(p)
+        const jogadores = p.matched.length + p.unmatched.length
+        setMsgs(prev => [...prev,
+          { role: 'user', text: `📋 Log do canal (${p.linhas} linhas · ${jogadores} jogador${jogadores !== 1 ? 'es' : ''} único${jogadores !== 1 ? 's' : ''})` },
+          { role: 'log-preview' },
+        ])
+        showToast(`Log detectado — ${jogadores} jogadores únicos`, 'info')
+      } catch (err) {
+        showToast(`Erro ao processar log: ${err.message}`, 'error')
+        console.error('[LOG-PREVIEW]', err)
+      }
       return
     }
 
@@ -5619,8 +5636,10 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
         n = execAcoes(data.acoes)
       }
       setMsgs(prev => [...prev, { role: 'ai', text: data.resposta, acoes: n, avisos: data._avisos || [] }])
+      if (n > 0) showToast(`${n} ${n > 1 ? 'ações' : 'ação'} executada${n > 1 ? 's' : ''}`, 'success')
     } catch (e) {
       setMsgs(prev => [...prev, { role: 'ai', text: `Erro: ${e.message}`, error: true }])
+      showToast(e.message || 'Erro ao processar comando.', 'error')
     } finally {
       setLoading(false)
     }
@@ -5714,9 +5733,9 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
                     ))}
                     {jaTemData  && <span style={{ fontSize: 9, color: '#22c55e', fontWeight: 700, flexShrink: 0 }}>✓ ok</span>}
                     {naoAplica && !jaTemData && <span style={{ fontSize: 9, color: C.textMuted, flexShrink: 0 }}>n/a</span>}
-                    {(mensagensPorNick?.get(tutor.nick.toLowerCase()) || []).length > 0 && (
+                    {(mensagensPorNick?.[tutor.nick.toLowerCase()] || []).length > 0 && (
                       <button
-                        onClick={e => { e.stopPropagation(); setLogMsgModal({ nick: tutor.nick, msgs: mensagensPorNick.get(tutor.nick.toLowerCase()) || [], spansMidnight, dataLog, data2 }) }}
+                        onClick={e => { e.stopPropagation(); setLogMsgModal({ nick: tutor.nick, msgs: mensagensPorNick[tutor.nick.toLowerCase()] || [], spansMidnight, dataLog, data2 }) }}
                         title="Ver mensagens deste tutor no log"
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: '1px 3px', display: 'flex', alignItems: 'center', flexShrink: 0, marginLeft: 2 }}
                         onMouseEnter={e => e.currentTarget.style.color = C.primaryBright}
