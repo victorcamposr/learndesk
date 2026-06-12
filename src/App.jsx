@@ -2056,10 +2056,11 @@ function parseChatLog(text) {
 
 // ── parseChatLogFull — extrai nomes + detecta virada de meia-noite ──────────
 function parseChatLogFull(text) {
-  const re = /^(\d{2}):(\d{2}):\d{2}\s+(.+?)\s+\[\d+\]:/gm
+  const re = /^(\d{2}):(\d{2}):\d{2}\s+(.+?)\s+\[\d+\]:\s*(.*)/gm
   const nomes = new Set()
-  const beforeMidnight = new Set()  // nicks (lowercase) que apareceram antes da virada
-  const afterMidnight  = new Set()  // nicks (lowercase) que apareceram após a virada
+  const beforeMidnight  = new Set()
+  const afterMidnight   = new Set()
+  const mensagensPorNick = new Map()
   let crossedMidnight = false
   let prevMinutes = -1
   let m
@@ -2073,9 +2074,12 @@ function parseChatLogFull(text) {
     nomes.add(nick)
     if (crossedMidnight) afterMidnight.add(nickLow)
     else beforeMidnight.add(nickLow)
+    const arr = mensagensPorNick.get(nickLow) || []
+    arr.push({ time: `${m[1]}:${m[2]}`, text: (m[4] || '').trim(), depois: crossedMidnight })
+    mensagensPorNick.set(nickLow, arr)
     prevMinutes = minutes
   }
-  return { nomes, spansMidnight: crossedMidnight, beforeMidnight, afterMidnight }
+  return { nomes, spansMidnight: crossedMidnight, beforeMidnight, afterMidnight, mensagensPorNick }
 }
 
 // ── ImportModal ───────────────────────────────────────────────────────────────
@@ -5426,12 +5430,13 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
   }
 
   // ── Estado e handlers para detecção de log de canal ─────────────────────────
-  const [preview, setPreview] = useState(null)
+  const [preview, setPreview]         = useState(null)
+  const [logMsgModal, setLogMsgModal] = useState(null)
   // preview: { matched: [{tutor, jaTemData, naoAplica}], unmatched: string[],
   //            dataLog: string, selecionados: Set<id>, confirmed: boolean, linhas: number }
 
   const buildPreview = useCallback((text, data) => {
-    const { nomes, spansMidnight, beforeMidnight, afterMidnight } = parseChatLogFull(text)
+    const { nomes, spansMidnight, beforeMidnight, afterMidnight, mensagensPorNick } = parseChatLogFull(text)
     const today = todayStr()
     // Se o log cruza meia-noite: data = ontem (primária), data2 = hoje (secundária)
     const data2 = spansMidnight && data !== today ? today : null
@@ -5455,7 +5460,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
       }
     }
     const selecionados = new Set(matched.filter(m => !m.jaTemData && !m.naoAplica).map(m => m.tutor.id))
-    return { matched, unmatched, dataLog: data, data2, spansMidnight, beforeMidnight, afterMidnight, selecionados, confirmed: false, linhas: text.trim().split('\n').length }
+    return { matched, unmatched, dataLog: data, data2, spansMidnight, beforeMidnight, afterMidnight, mensagensPorNick, selecionados, confirmed: false, linhas: text.trim().split('\n').length }
   }, [tutores])
 
   const handleChangeDate = (newDate) => {
@@ -5520,6 +5525,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     const fmtDate = d => `${d.slice(8)}/${d.slice(5,7)}`
     const datesDesc = allNovas.map(fmtDate).join(' e ')
     setPreview(p => ({ ...p, confirmed: true }))
+    setLogMsgModal(null)
     setMsgs(prev => [...prev, {
       role: 'ai',
       text: `${count} presença${count > 1 ? 's' : ''} registrada${count > 1 ? 's' : ''} em ${datesDesc}.`,
@@ -5623,7 +5629,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
   // ── Renderização do card de log inline ────────────────────────────────────────
   const renderLogPreview = () => {
     if (!preview || preview.confirmed) return null
-    const { matched, unmatched, dataLog, data2, spansMidnight, selecionados } = preview
+    const { matched, unmatched, dataLog, data2, spansMidnight, selecionados, mensagensPorNick } = preview
     const pendentes = matched.filter(m => !m.jaTemData && !m.naoAplica)
     const allSel = pendentes.length > 0 && pendentes.every(m => selecionados.has(m.tutor.id))
 
@@ -5641,7 +5647,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
         </div>
 
         {/* Seletor de data */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <Calendar size={11} color={C.textMuted} />
           <span style={{ fontSize: 11, color: C.textMuted }}>Data do log:</span>
           <input
@@ -5655,6 +5661,11 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
               outline: 'none', cursor: 'pointer',
             }}
           />
+          {spansMidnight && data2 && (
+            <span style={{ fontSize: 11, color: C.textSoft }}>
+              — {data2.slice(8)}/{data2.slice(5,7)}/{data2.slice(0,4)}
+            </span>
+          )}
         </div>
 
         {/* Lista de tutores */}
@@ -5703,6 +5714,17 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
                     ))}
                     {jaTemData  && <span style={{ fontSize: 9, color: '#22c55e', fontWeight: 700, flexShrink: 0 }}>✓ ok</span>}
                     {naoAplica && !jaTemData && <span style={{ fontSize: 9, color: C.textMuted, flexShrink: 0 }}>n/a</span>}
+                    {(mensagensPorNick?.get(tutor.nick.toLowerCase()) || []).length > 0 && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setLogMsgModal({ nick: tutor.nick, msgs: mensagensPorNick.get(tutor.nick.toLowerCase()) || [], spansMidnight, dataLog, data2 }) }}
+                        title="Ver mensagens deste tutor no log"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: '1px 3px', display: 'flex', alignItems: 'center', flexShrink: 0, marginLeft: 2 }}
+                        onMouseEnter={e => e.currentTarget.style.color = C.primaryBright}
+                        onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
+                      >
+                        <Eye size={11} />
+                      </button>
+                    )}
                   </div>
                 )
               })}
@@ -5904,7 +5926,50 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
 
       {/* Overlay para fechar clicando fora */}
       {open && (
-        <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 999 }} />
+        <div onClick={() => { setOpen(false); setLogMsgModal(null) }} style={{ position: 'fixed', inset: 0, zIndex: 999 }} />
+      )}
+
+      {/* Modal de mensagens do tutor no log */}
+      {logMsgModal && open && (
+        <div style={{
+          position: 'fixed', bottom: 84, right: 412, width: 340, maxHeight: 480,
+          background: '#0d0f1f', border: `1px solid ${C.border}`,
+          borderRadius: 18, zIndex: 1002,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(99,102,241,0.15)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          animation: 'fade-in .15s ease',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: `1px solid ${C.border}`, background: `linear-gradient(135deg, ${C.primary}18, transparent)`, flexShrink: 0 }}>
+            <MessageSquare size={13} color={C.primaryBright} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{logMsgModal.nick}</div>
+              <div style={{ fontSize: 10, color: C.textMuted }}>{logMsgModal.msgs.length} msg{logMsgModal.msgs.length !== 1 ? 's' : ''} no log</div>
+            </div>
+            <button onClick={() => setLogMsgModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 4, display: 'flex', flexShrink: 0 }}>
+              <X size={13} />
+            </button>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {logMsgModal.msgs.map((msg, i) => {
+              const dataBadge = logMsgModal.spansMidnight
+                ? (msg.depois
+                    ? `${(logMsgModal.data2 || '').slice(8)}/${(logMsgModal.data2 || '').slice(5,7)}`
+                    : `${logMsgModal.dataLog.slice(8)}/${logMsgModal.dataLog.slice(5,7)}`)
+                : null
+              return (
+                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '4px 6px', borderRadius: 7, background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}44` }}>
+                  <span style={{ fontSize: 10, color: C.textMuted, fontFamily: 'monospace', flexShrink: 0, marginTop: 1 }}>{msg.time}</span>
+                  {dataBadge && (
+                    <span style={{ fontSize: 9, color: msg.depois ? '#22c55e' : C.primaryBright, background: msg.depois ? 'rgba(34,197,94,0.1)' : 'rgba(99,102,241,0.1)', borderRadius: 4, padding: '1px 4px', flexShrink: 0, marginTop: 1 }}>
+                      {dataBadge}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 11, color: C.textSoft, lineHeight: 1.45, wordBreak: 'break-word' }}>{msg.text}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       )}
 
       {/* Botão flutuante */}
