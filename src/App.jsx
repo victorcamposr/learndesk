@@ -2348,6 +2348,12 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
   const [exportOpen, setExportOpen] = useState(false)
   const [profileId, setProfileId]   = useState(null)
   const [repliesData, setRepliesData] = useState({})
+
+  useEffect(() => {
+    apiFetch('/api/replies').then(r => r.json()).then(d => {
+      if (d && !d.error) setRepliesData(d)
+    }).catch(() => {})
+  }, [])
   const [search, setSearch]         = useState('')
   const [viewMode, setViewMode]     = useState('list')
   const [filterTab, setFilterTab]   = useState('ativos')
@@ -6736,15 +6742,13 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     Promise.all([
       apiFetch('/api/tutores').then(r => r.json()),
       apiFetch('/api/settings').then(r => r.json()).catch(() => ({})),
-      apiFetch('/api/replies').then(r => r.json()).catch(() => ({})),
-    ]).then(([tutoresData, settingsData, repliesRaw]) => {
+    ]).then(([tutoresData, settingsData]) => {
       setTutores(Array.isArray(tutoresData) ? tutoresData : [])
       if (settingsData && !settingsData.error && Object.keys(settingsData).length > 0) {
         const merged = { ...DEFAULT_CFG, ...settingsData }
         _cfg = merged
         setCfg(merged)
       }
-      if (repliesRaw && !repliesRaw.error) setRepliesData(repliesRaw)
     }).catch(() => setTutores([]))
       .finally(() => { pendingAuditRef.current = { skip: true }; setDataLoaded(true) })
   }, [])
