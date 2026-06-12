@@ -5070,29 +5070,11 @@ const SEEN_KEY = 'rubinot_seen_alerts'
 const loadSeenMap = () => { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') } catch { return {} } }
 const saveSeenMap = m => localStorage.setItem(SEEN_KEY, JSON.stringify(m))
 
-function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSettings, onOpenSettingsDevices, onChangeServer }) {
+function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSettings, onOpenSettingsDevices, onChangeServer, pendingDevices = 0 }) {
   const [scrolled, setScrolled]           = useState(false)
   const [bellOpen, setBellOpen]           = useState(false)
   const [hovered, setHovered]             = useState(null)
   const [seenMap, setSeenMap]             = useState(() => loadSeenMap())
-  const [pendingDevices, setPendingDevices] = useState(0)
-
-  useEffect(() => {
-    if (!meInfo?.isAdmin) return
-    const check = async () => {
-      try {
-        const r = await apiFetch('/api/auth/devices')
-        if (r.ok) {
-          const list = await r.json()
-          setPendingDevices(list.filter(d => d.status === 'pending').length)
-        }
-      } catch {}
-    }
-    check()
-    const id = setInterval(check, 12000)
-    window.addEventListener('rubinot:devices-changed', check)
-    return () => { clearInterval(id); window.removeEventListener('rubinot:devices-changed', check) }
-  }, [meInfo?.isAdmin])
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10)
@@ -6722,8 +6704,9 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
       } catch {}
     }
     check()
-    const id = setInterval(check, 30000)
-    return () => clearInterval(id)
+    const id = setInterval(check, 12000)
+    window.addEventListener('rubinot:devices-changed', check)
+    return () => { clearInterval(id); window.removeEventListener('rubinot:devices-changed', check) }
   }, [meInfo?.isAdmin])
 
   const openSettings = useCallback((t = 'config') => { setSettingsTab(t); setSettingsOpen(true) }, [])
@@ -6792,7 +6775,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     <div style={{ minHeight: '100vh', background: 'transparent', position: 'relative', zIndex: 1 }}>
       <BackgroundImage />
       <div style={{ position: 'relative', zIndex: 1 }}>
-        <Header tab={tab} setTab={setTab} tutores={tutores} servers={serversProp} meInfo={meInfo} onOpenSettings={() => openSettings('config')} onOpenSettingsDevices={() => openSettings('devices')} onChangeServer={onChangeServer} />
+        <Header tab={tab} setTab={setTab} tutores={tutores} servers={serversProp} meInfo={meInfo} onOpenSettings={() => openSettings('config')} onOpenSettingsDevices={() => openSettings('devices')} onChangeServer={onChangeServer} pendingDevices={pendingDevices} />
         <main key={tab} className="tab-enter" style={{ paddingBottom: 60 }}>
           {!dataLoaded ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 16 }}>
