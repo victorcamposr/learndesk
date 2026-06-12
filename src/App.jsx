@@ -5476,6 +5476,21 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     ])
   }
 
+  // ── Detecta se o log é de hoje ou de ontem baseado nos timestamps ────────────
+  const detectLogDate = (text) => {
+    const now = new Date()
+    const currentMinutes = now.getHours() * 60 + now.getMinutes()
+    const times = [...text.matchAll(/^(\d{2}):(\d{2}):\d{2}/gm)]
+    if (!times.length) return todayStr()
+    const maxMinutes = Math.max(...times.map(m => +m[1] * 60 + +m[2]))
+    if (maxMinutes > currentMinutes) {
+      const d = new Date(now)
+      d.setDate(d.getDate() - 1)
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    }
+    return todayStr()
+  }
+
   // ── Anexo de arquivo .txt ─────────────────────────────────────────────────────
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0]
@@ -5486,7 +5501,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
       const text = ev.target.result || ''
       const logLineCount = (text.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
       if (logLineCount >= 3) {
-        const p = buildPreview(text, todayStr())
+        const p = buildPreview(text, detectLogDate(text))
         setPreview(p)
         const jogadores = p.matched.length + p.unmatched.length
         setMsgs(prev => [...prev,
@@ -5510,7 +5525,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     // Detecta log de canal: ≥3 linhas no formato "HH:MM:SS Nome [nível]:"
     const logLineCount = (msg.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
     if (logLineCount >= 3) {
-      const p = buildPreview(msg, todayStr())
+      const p = buildPreview(msg, detectLogDate(msg))
       setPreview(p)
       const jogadores = p.matched.length + p.unmatched.length
       setMsgs(prev => [...prev,
