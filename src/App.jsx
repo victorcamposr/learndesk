@@ -6759,6 +6759,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
   useEffect(() => {
     if (!dataLoaded) return
     const id = setInterval(async () => {
+      if (saveTimer.current) return  // save pendente — pula o poll para não perder edição
       try {
         const r = await apiFetch('/api/tutores')
         if (!r.ok) return
