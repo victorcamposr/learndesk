@@ -156,28 +156,30 @@ const AUTH_COOKIE_OPTS = {
 
 
 // ── Campos computados (atividade + elegibilidade) ─────────────────────────────
-function _calcAtividadeFromPresencas(presencas, dataInicio, baixaMax, moderadaMax, hoje) {
-  const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`
-  const count = (presencas || []).filter(d => d.startsWith(mesAtual)).length
-  if (count === 0) return 'Não Definida'
-  let adjusted = count
-  if (dataInicio && dataInicio.startsWith(mesAtual)) {
-    const joinDate = new Date(dataInicio)
-    const daysActive = Math.max(1, Math.floor((hoje - joinDate) / 86400000) + 1)
-    const totalDays = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
-    adjusted = Math.round(count * (totalDays / daysActive))
-  }
-  if (adjusted <= baixaMax) return 'Baixa'
-  if (adjusted <= moderadaMax) return 'Moderada'
+// A atividade vem das replies mensais informadas manualmente (formulário que
+// chega todo início de mês). O mês de referência é sempre o mês anterior — é o
+// último período fechado, e o único com número consolidado.
+const DEFAULT_BAIXA_MAX    = 20
+const DEFAULT_MODERADA_MAX = 50
+
+function mesRefKey(hoje) {
+  const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+}
+
+function atividadeFromReplies(count, baixaMax, moderadaMax) {
+  if (typeof count !== 'number') return 'Não Definida'
+  if (count <= baixaMax) return 'Baixa'
+  if (count <= moderadaMax) return 'Moderada'
   return 'Alta'
 }
 
-function calcAtividade(tutor, settings, hoje) {
-  if (!settings.atividadeAutomatica) return tutor.atividade || 'Não Definida'
-  if (settings.presencaApenasEmTeste && tutor.cargo !== 'Em Teste') return tutor.atividade || 'Não Definida'
-  return _calcAtividadeFromPresencas(
-    tutor.presencas, tutor.dataInicio,
-    settings.baixaMax ?? 7, settings.moderadaMax ?? 15, hoje
+function calcAtividade(tutor, settings, replies, hoje) {
+  const count = replies?.[tutor.nick?.toLowerCase()]?.[mesRefKey(hoje)]
+  return atividadeFromReplies(
+    count,
+    settings.baixaMax ?? DEFAULT_BAIXA_MAX,
+    settings.moderadaMax ?? DEFAULT_MODERADA_MAX
   )
 }
 
@@ -198,9 +200,9 @@ function calcApto(tutor, atividadeCalculada, hoje) {
   return false
 }
 
-function enrichTutores(tutores, settings, hoje) {
+function enrichTutores(tutores, settings, replies, hoje) {
   return tutores.map(t => {
-    const atividadeCalculada = calcAtividade(t, settings, hoje)
+    const atividadeCalculada = calcAtividade(t, settings, replies, hoje)
     return { ...t, atividadeCalculada, apto: calcApto(t, atividadeCalculada, hoje) }
   })
 }
@@ -531,28 +533,6 @@ app.get('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
   const todayIso = hoje.toISOString().slice(0, 10)
   let modified = false
 
-  // Reset mensal de atividade
-  if (settings.presencaApenasEmTeste === true && settings.atividadeAutomatica !== false) {
-    const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`
-    const resetKey = serverKey(req, 'atividade_reset')
-    if (getKV(resetKey) !== mesAtual) {
-      const mesPrev = (() => {
-        const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
-        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
-      })()
-      tutores = tutores.map(t => {
-        if (t.cargo === 'Em Teste') return t
-        const historico = [...(t.atividadeHistorico || [])]
-        if (!historico.find(h => h.mes === mesPrev))
-          historico.push({ mes: mesPrev, atividade: t.atividade || 'Não Definida' })
-        return { ...t, atividade: 'Não Definida', atividadeHistorico: historico }
-      })
-      setKV(resetKey, mesAtual)
-      addAuditLog('sistema', 'atividade_reset_mensal', { server: req.headers['x-server'] || '?', mes: mesPrev })
-      modified = true
-    }
-  }
-
   // Auto-promoção: Em Teste → Tutor após 30 dias (usando data confiável do servidor)
   tutores = tutores.map(t => {
     if (t.cargo !== 'Em Teste' || !t.dataInicio) return t
@@ -579,7 +559,7 @@ app.get('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
 
   if (modified) setKV(serverKey(req, 'tutores'), tutores)
 
-  res.json(enrichTutores(tutores, settings, hoje))
+  res.json(enrichTutores(tutores, settings, getKV(serverKey(req, 'replies')) || {}, hoje))
 })
 
 app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
@@ -587,8 +567,6 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
   if (!Array.isArray(tutores)) return res.status(400).json({ error: 'Dados inválidos' })
   const CARGOS_VALIDOS = ['Tutor', 'Em Teste', 'Sênior', 'Inativo', 'Desligado']
   const todayIso = new Date().toISOString().slice(0, 10)
-  // Amanhã com margem de 1 dia para fuso (aceita até 1 dia à frente por segurança)
-  const maxPresencaDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
   const nicksVistos = new Set()
   for (const t of tutores) {
     if (typeof t !== 'object' || t === null || typeof t.nick !== 'string' || !t.nick.trim())
@@ -603,11 +581,6 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
     // dataInicio não pode ser futura
     if (t.dataInicio && t.dataInicio > todayIso)
       return res.status(400).json({ error: `Data de início futura inválida: ${t.nick}` })
-    // Presenças não podem ser datas muito futuras
-    for (const d of (t.presencas || [])) {
-      if (typeof d === 'string' && d > maxPresencaDate)
-        return res.status(400).json({ error: `Presença com data futura inválida: ${t.nick} (${d})` })
-    }
     const ausencias = t.ausencias || []
     for (let i = 0; i < ausencias.length; i++) {
       const a = ausencias[i]
@@ -660,118 +633,55 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
     text: typeof h?.text === 'string' ? h.text.slice(0, 500) : '',
   })).filter(h => h.role && h.text)
   const srvSettings = getKV(serverKey(req, 'settings')) || {}
-  const presencaApenasEmTeste = srvSettings.presencaApenasEmTeste === true
 
   const today = new Date()
   const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
   const todayStr = fmt(today)
 
   try {
-    const parsed = parseCommand(message, tutores, safeHistory, { todayStr, presencaApenasEmTeste })
-
-    // Server-side dedup: remove add_presenca e add_presenca_todos se data já existe
-    if (Array.isArray(parsed.acoes)) {
-      const tutorMap = {}
-      for (const t of tutores) tutorMap[t.nick?.toLowerCase()] = t
-      const removidas = []
-      const ATIVOS = presencaApenasEmTeste ? ['Em Teste'] : ['Tutor', 'Em Teste', 'Sênior']
-
-      parsed.acoes = parsed.acoes.filter(a => {
-        if (a.tipo === 'add_presenca') {
-          const t = tutorMap[a.nick?.toLowerCase()]
-          if (!t) return true
-          const already = (t.presencas || []).includes(a.data)
-          if (already) removidas.push({ nick: a.nick, data: a.data })
-          return !already
-        }
-        if (a.tipo === 'add_presenca_todos') {
-          const exceto = (a.exceto || []).map(n => n.toLowerCase())
-          const afetados = tutores.filter(t =>
-            ATIVOS.includes(t.cargo) && !exceto.includes(t.nick?.toLowerCase())
-          )
-          const jaTem = afetados.filter(t => (t.presencas || []).includes(a.data))
-          const semPresenca = afetados.filter(t => !(t.presencas || []).includes(a.data))
-          jaTem.forEach(t => removidas.push({ nick: t.nick, data: a.data }))
-          // se todos já têm, remove a ação inteira
-          if (semPresenca.length === 0) return false
-          // se alguns já têm, ajusta o exceto para incluí-los
-          if (jaTem.length > 0) a.exceto = [...(a.exceto || []), ...jaTem.map(t => t.nick)]
-          return true
-        }
-        return true
-      })
-
-      if (removidas.length > 0) {
-        const nomes = removidas.map(a => `${a.nick} em ${a.data}`).join(', ')
-        parsed._avisos = [...(parsed._avisos || []), `Presença já registrada (ignorada): ${nomes}`]
-        if (parsed.acoes.length === 0) {
-          parsed.resposta = `Já ${removidas.length > 1 ? 'existem presenças registradas' : 'existe presença registrada'} para: ${nomes}. Nenhuma alteração feita.`
-        } else {
-          parsed.resposta += ` (ignorado — já existia: ${nomes})`
-        }
-      }
-    }
+    const parsed = parseCommand(message, tutores, safeHistory, { todayStr })
 
     // Auditoria: loga cada ação gerada pela IA
     if (Array.isArray(parsed.acoes) && parsed.acoes.length > 0) {
       const actor = getDeviceApelido(req) || 'sistema'
       const server = req.headers['x-server'] || '?'
       const ACTION_MAP = {
-        add_presenca: 'presenca_add', remove_presenca: 'presenca_remove',
-        add_presenca_todos: 'presenca_add_todos', add_ausencia: 'ausencia_add',
+        add_ausencia: 'ausencia_add',
         remove_ausencia: 'ausencia_remove', change_cargo: 'cargo_change',
         add_obs: 'obs_add',
       }
       for (const a of parsed.acoes) {
         const auditAction = ACTION_MAP[a.tipo] || a.tipo
-        const exceto = a.exceto?.length ? ` (exceto: ${a.exceto.join(', ')})` : ''
-        const nick = a.tipo === 'add_presenca_todos'
-          ? `todos${exceto}`
-          : (a.nick || '?')
-        addAuditLog(actor, auditAction, { server, nick, ...(a.data ? { data: a.data } : {}), ...(a.cargo ? { cargo: a.cargo } : {}), via: 'IA' })
+        addAuditLog(actor, auditAction, { server, nick: a.nick || '?', ...(a.data ? { data: a.data } : {}), ...(a.cargo ? { cargo: a.cargo } : {}), via: 'IA' })
       }
 
       // Aplica acoes diretamente no banco (evita depender do save client-side)
-      const ATIVOS = presencaApenasEmTeste ? ['Em Teste'] : ['Tutor', 'Em Teste', 'Sênior']
       const storedKey = serverKey(req, 'tutores')
       const stored = getKV(storedKey) || []
       let updatedStored = [...stored]
       for (const a of parsed.acoes) {
-        if (a.tipo === 'add_presenca_todos') {
-          const exceto = (a.exceto || []).map(n => n.toLowerCase())
-          updatedStored = updatedStored.map(t => {
-            if (exceto.includes(t.nick?.toLowerCase())) return t
-            if (!ATIVOS.includes(t.cargo)) return t
-            return { ...t, presencas: [...new Set([...(t.presencas || []), a.data])] }
-          })
-        } else {
-          updatedStored = updatedStored.map(t => {
-            if (t.nick?.toLowerCase() !== a.nick?.toLowerCase()) return t
-            console.log(`[IA-APPLY] match nick="${t.nick}" tipo=${a.tipo} data=${a.data}`)
-            if (a.tipo === 'add_presenca')
-              return { ...t, presencas: [...new Set([...(t.presencas || []), a.data])] }
-            if (a.tipo === 'remove_presenca')
-              return { ...t, presencas: (t.presencas || []).filter(d => d !== a.data) }
-            if (a.tipo === 'add_ausencia') {
-              const nova = { id: Date.now() + Math.random(), dataInicio: a.dataInicio, dataFim: a.dataFim, motivo: a.motivo || '' }
-              return { ...t, ausencias: [...(t.ausencias || []), nova] }
-            }
-            if (a.tipo === 'remove_ausencia') {
-              const ativas = (t.ausencias || []).filter(au => au.dataFim && au.dataFim >= todayStr)
-              if (!ativas.length) return t
-              const proxima = ativas.reduce((min, au) => au.dataFim < min.dataFim ? au : min, ativas[0])
-              return { ...t, ausencias: (t.ausencias || []).filter(au => au.id !== proxima.id) }
-            }
-            if (a.tipo === 'change_cargo')
-              return { ...t, cargo: a.cargo, ...(a.cargo === 'Tutor' && t.cargo === 'Em Teste' ? { dataEfetivacao: todayStr } : {}) }
-            if (a.tipo === 'add_obs')
-              return { ...t, obs: a.obs }
-            return t
-          })
-        }
+        updatedStored = updatedStored.map(t => {
+          if (t.nick?.toLowerCase() !== a.nick?.toLowerCase()) return t
+          console.log(`[IA-APPLY] match nick="${t.nick}" tipo=${a.tipo}`)
+          if (a.tipo === 'add_ausencia') {
+            const nova = { id: Date.now() + Math.random(), dataInicio: a.dataInicio, dataFim: a.dataFim, motivo: a.motivo || '' }
+            return { ...t, ausencias: [...(t.ausencias || []), nova] }
+          }
+          if (a.tipo === 'remove_ausencia') {
+            const ativas = (t.ausencias || []).filter(au => au.dataFim && au.dataFim >= todayStr)
+            if (!ativas.length) return t
+            const proxima = ativas.reduce((min, au) => au.dataFim < min.dataFim ? au : min, ativas[0])
+            return { ...t, ausencias: (t.ausencias || []).filter(au => au.id !== proxima.id) }
+          }
+          if (a.tipo === 'change_cargo')
+            return { ...t, cargo: a.cargo, ...(a.cargo === 'Tutor' && t.cargo === 'Em Teste' ? { dataEfetivacao: todayStr } : {}) }
+          if (a.tipo === 'add_obs')
+            return { ...t, obs: a.obs }
+          return t
+        })
       }
       setKV(storedKey, updatedStored)
-      parsed._tutores = enrichTutores(updatedStored, srvSettings, new Date())
+      parsed._tutores = enrichTutores(updatedStored, srvSettings, getKV(serverKey(req, 'replies')) || {}, new Date())
     }
 
     res.json(parsed)
@@ -787,9 +697,12 @@ app.post('/api/settings', requireAuth, requireAdmin, requireServerAccess, (req, 
   const { settings } = req.body || {}
   if (!settings || typeof settings !== 'object' || Array.isArray(settings))
     return res.status(400).json({ error: 'Dados inválidos' })
-  const { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica, presencaApenasEmTeste } = settings
-  setKV(serverKey(req, 'settings'), { diasParaAlerta, baixaMax, moderadaMax, atividadeAutomatica: atividadeAutomatica !== false, presencaApenasEmTeste: presencaApenasEmTeste === true })
-  addAuditLog(getDeviceApelido(req) || 'admin', 'settings_save', { server: req.headers['x-server'] || '?', diasParaAlerta, baixaMax, moderadaMax })
+  const baixaMax    = Number(settings.baixaMax)
+  const moderadaMax = Number(settings.moderadaMax)
+  if (!Number.isFinite(baixaMax) || !Number.isFinite(moderadaMax) || baixaMax < 0 || moderadaMax <= baixaMax)
+    return res.status(400).json({ error: 'Faixas de replies inválidas' })
+  setKV(serverKey(req, 'settings'), { baixaMax, moderadaMax })
+  addAuditLog(getDeviceApelido(req) || 'admin', 'settings_save', { server: req.headers['x-server'] || '?', baixaMax, moderadaMax })
   res.json({ ok: true })
 })
 
@@ -802,15 +715,32 @@ app.post('/api/replies', requireAuth, requireServerAccess, (req, res) => {
   if (!replies || typeof replies !== 'object' || Array.isArray(replies))
     return res.status(400).json({ error: 'Dados inválidos' })
   const existing = getKV(serverKey(req, 'replies')) || {}
+  const alterados = []
+  // Semântica de sobrescrita: o número informado no formulário mensal é a verdade.
+  // `null` limpa o mês (volta a contar como "não preenchido").
   for (const [nick, months] of Object.entries(replies)) {
-    if (typeof months !== 'object' || Array.isArray(months)) continue
-    if (!existing[nick]) existing[nick] = {}
+    if (typeof months !== 'object' || months === null || Array.isArray(months)) continue
+    const nickLow = String(nick).toLowerCase()
     for (const [month, count] of Object.entries(months)) {
-      if (typeof count === 'number' && /^\d{4}-\d{2}$/.test(month))
-        existing[nick][month] = (existing[nick][month] || 0) + count
+      if (!/^\d{4}-\d{2}$/.test(month)) continue
+      if (count === null) {
+        if (existing[nickLow]) delete existing[nickLow][month]
+        alterados.push(`${nickLow}/${month}=—`)
+        continue
+      }
+      if (typeof count !== 'number' || !Number.isFinite(count) || count < 0) continue
+      if (!existing[nickLow]) existing[nickLow] = {}
+      existing[nickLow][month] = Math.round(count)
+      alterados.push(`${nickLow}/${month}=${Math.round(count)}`)
     }
   }
   setKV(serverKey(req, 'replies'), existing)
+  if (alterados.length)
+    addAuditLog(getDeviceApelido(req) || 'sistema', 'replies_save', {
+      server: req.headers['x-server'] || '?',
+      count: alterados.length,
+      detalhe: alterados.slice(0, 20).join(', '),
+    })
   res.json({ ok: true })
 })
 

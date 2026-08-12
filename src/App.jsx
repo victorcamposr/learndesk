@@ -21,6 +21,7 @@ import {
   Skull, Fish, Flower, Castle, Dices, Scroll, Infinity,
   Hexagon, Triangle, Diamond, Layers, Radio, Telescope,
   Binoculars, Microscope, Sunrise, Tornado, Lightbulb, Paperclip,
+  Reply, ListChecks,
 } from 'lucide-react'
 
 const mkRoman = r => ({ size = 16, color = 'currentColor' }) => (
@@ -92,9 +93,15 @@ const ATIVIDADES = ['Alta', 'Moderada', 'Baixa', 'Não Definida']
 const PERIODOS   = ['Manhã', 'Tarde', 'Noite']
 const DIAS_SEMANA = ['Semana', 'FDS', 'Ambos']
 
-const DEFAULT_CFG = { diasParaAlerta: 2, baixaMax: 7, moderadaMax: 15, atividadeAutomatica: true, presencaApenasEmTeste: false }
+// Faixas de replies mensais → nível de atividade.
+const DEFAULT_CFG = { baixaMax: 20, moderadaMax: 50 }
 
 let _cfg = { ...DEFAULT_CFG }
+
+// Replies mensais informadas manualmente: { nickLow: { 'YYYY-MM': número } }.
+// Módulo-level (mesmo padrão de _cfg) para que getAtividade continue sendo
+// função pura de tutor, sem precisar passar o mapa por toda a árvore.
+let _replies = {}
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 // Token de auth em sessionStorage (some ao fechar o browser, não é compartilhado entre abas).
@@ -362,41 +369,64 @@ function normalizePhone(v) {
   return formatCelular(clean)
 }
 
-function diasSemPresenca(tutor) {
-  if (_cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste') return null
-  const presencas = tutor.presencas || []
-  const refDate = presencas.length > 0 ? [...presencas].sort().at(-1) : tutor.dataInicio
-  if (!refDate) return null
-  const dias = Math.floor((new Date() - new Date(refDate)) / 86400000)
-  return dias > _cfg.diasParaAlerta ? dias : null
+// ── Replies mensais ───────────────────────────────────────────────────────────
+const monthKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
+// Mês de referência da atividade = mês anterior. É o último período fechado e o
+// único com número consolidado (o formulário chega no início do mês seguinte).
+function mesRefKey(ref = new Date()) {
+  return monthKey(new Date(ref.getFullYear(), ref.getMonth() - 1, 1))
 }
 
-function calcAtividadeFromPresencas(presencas = [], dataInicio) {
-  const hoje = new Date()
-  const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`
-  const count = (presencas || []).filter(d => d.startsWith(mesAtual)).length
-  if (count === 0) return 'Não Definida'
+function mesLabel(key) {
+  const [y, m] = key.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' })
+}
 
-  let adjusted = count
-  if (dataInicio && dataInicio.startsWith(mesAtual)) {
-    const joinDate = new Date(dataInicio)
-    const daysActive = Math.max(1, Math.floor((hoje - joinDate) / 86400000) + 1)
-    const totalDays  = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
-    adjusted = Math.round(count * (totalDays / daysActive))
-  }
+function mesLabelLongo(key) {
+  const [y, m] = key.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+}
 
-  if (adjusted <= _cfg.baixaMax)    return 'Baixa'
-  if (adjusted <= _cfg.moderadaMax) return 'Moderada'
+// Últimos N meses (mais antigo → mais recente), terminando no mês de referência.
+function ultimosMeses(n = 6, ate = mesRefKey()) {
+  const [y, m] = ate.split('-').map(Number)
+  return Array.from({ length: n }, (_, i) => {
+    const key = monthKey(new Date(y, m - 1 - (n - 1 - i), 1))
+    return { key, label: mesLabel(key) }
+  })
+}
+
+// undefined = mês não preenchido (≠ 0 replies, que é um dado válido).
+function getReplies(tutor, mes = mesRefKey()) {
+  const v = _replies?.[tutor?.nick?.toLowerCase()]?.[mes]
+  return typeof v === 'number' ? v : undefined
+}
+
+function atividadeFromReplies(count) {
+  if (typeof count !== 'number') return 'Não Definida'
+  if (count <= _cfg.baixaMax)    return 'Baixa'
+  if (count <= _cfg.moderadaMax) return 'Moderada'
   return 'Alta'
+}
+
+// Tutor entrou a tempo de ter atuado no mês (não cobra replies de quem só
+// começou depois) e não está fora da equipe.
+function esperaReplies(tutor, mes = mesRefKey()) {
+  if (tutor.cargo === 'Desligado' || tutor.cargo === 'Inativo') return false
+  if (!tutor.dataInicio) return true
+  return tutor.dataInicio.slice(0, 7) <= mes
+}
+
+function repliesPendente(tutor, mes = mesRefKey()) {
+  return esperaReplies(tutor, mes) && getReplies(tutor, mes) === undefined
 }
 
 function getAtividade(tutor) {
   // Usa valor pré-computado pelo servidor quando disponível (mais eficiente).
-  // É zerado localmente quando presencas ou cargo mudam, forçando recálculo local.
+  // É zerado localmente quando cargo/nick mudam, forçando recálculo local.
   if (tutor.atividadeCalculada != null) return tutor.atividadeCalculada
-  if (!_cfg.atividadeAutomatica) return tutor.atividade || 'Não Definida'
-  if (_cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste') return tutor.atividade || 'Não Definida'
-  return calcAtividadeFromPresencas(tutor.presencas, tutor.dataInicio)
+  return atividadeFromReplies(getReplies(tutor))
 }
 
 
@@ -650,21 +680,6 @@ function RechartTooltip({ active, payload, label }) {
           {p.name}: {p.value}
         </div>
       ))}
-    </div>
-  )
-}
-
-function AtividadeTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null
-  const atv = payload[0]?.payload?.atividade
-  const color = ATIVIDADE_COLORS[atv] || C.textMuted
-  return (
-    <div style={{
-      background: 'rgba(11,10,26,0.95)', backdropFilter: 'blur(12px)',
-      border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 14px',
-    }}>
-      {label && <div style={{ fontSize: 11, color: C.textSoft, marginBottom: 4 }}>{label}</div>}
-      <div style={{ color, fontSize: 13, fontWeight: 600 }}>{atv || 'Sem dados'}</div>
     </div>
   )
 }
@@ -1080,8 +1095,8 @@ function AusenciaModal({ tutor, open, onClose, onSave }) {
 // ── Formulário de tutor ───────────────────────────────────────────────────────
 const BLANK = {
   nick: '', nomeRL: '', celular: '', discord: '', cargo: 'Em Teste',
-  atividade: 'Não Definida', dataInicio: '', horariosSemana: [], horariosFDS: [],
-  detalheHorario: '', obs: '', obsIsDesligamento: false, ausencias: [], dataEfetivacao: '', presencas: [],
+  dataInicio: '', horariosSemana: [], horariosFDS: [],
+  detalheHorario: '', obs: '', obsIsDesligamento: false, ausencias: [], dataEfetivacao: '',
   obsHistorico: [], ausenciaHistorico: [],
 }
 const PERIODO_ICONS = { Manhã: Sun, Tarde: Sunset, Noite: Moon }
@@ -1187,16 +1202,10 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
         </div>
         <div>
           <label style={labelStyle}><Activity size={12} /> Atividade</label>
-          {_cfg.atividadeAutomatica && (!_cfg.presencaApenasEmTeste || form.cargo === 'Em Teste') ? (
-            <div style={{ ...inputBase, display: 'flex', alignItems: 'center', gap: 10, cursor: 'default', opacity: 0.8 }}>
-              <Badge label={getAtividade(form)} colorMap={ATIVIDADE_COLORS} />
-              <span style={{ fontSize: 11, color: C.textMuted }}>calculada pelas presenças mensais</span>
-            </div>
-          ) : (
-            <select style={inp('atividade')} value={form.atividade} onChange={e => set('atividade', e.target.value)}>
-              {ATIVIDADES.map(a => <option key={a}>{a}</option>)}
-            </select>
-          )}
+          <div style={{ ...inputBase, display: 'flex', alignItems: 'center', gap: 10, cursor: 'default', opacity: 0.8 }}>
+            <Badge label={getAtividade(form)} colorMap={ATIVIDADE_COLORS} />
+            <span style={{ fontSize: 11, color: C.textMuted }}>pelas replies de {mesLabel(mesRefKey())}</span>
+          </div>
         </div>
         <div>
           <label style={labelStyle}><Calendar size={12} /> Data Início</label>
@@ -1273,15 +1282,226 @@ function WhatsAppIcon({ size = 14 }) {
   )
 }
 
+// ── RepliesPopover — preenchimento rápido das replies de um tutor ─────────────
+function RepliesPopover({ tutor, mes, onSaveReplies, onClose, side = 'top' }) {
+  const atual = getReplies(tutor, mes)
+  const [val, setVal]       = useState(atual === undefined ? '' : String(atual))
+  const [saving, setSaving] = useState(false)
+  const showToast           = useToast()
+
+  const parsed  = val.trim() === '' ? null : Number(val)
+  const invalid = parsed !== null && (!Number.isFinite(parsed) || parsed < 0)
+
+  const submit = async () => {
+    if (invalid || saving) return
+    setSaving(true)
+    try {
+      await onSaveReplies({ [tutor.nick.toLowerCase()]: { [mes]: parsed === null ? null : Math.round(parsed) } })
+      showToast(parsed === null
+        ? `Replies de ${tutor.nick} em ${mesLabel(mes)} limpas`
+        : `${Math.round(parsed)} replies · ${tutor.nick} · ${mesLabel(mes)}`, 'success')
+      onClose()
+    } catch {
+      showToast('Erro ao salvar replies', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 699 }} onClick={onClose} />
+      <div style={{
+        position: 'absolute', right: 0, zIndex: 700,
+        ...(side === 'top' ? { bottom: 'calc(100% + 8px)' } : { top: 'calc(100% + 8px)' }),
+        background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)',
+        border: `1px solid ${C.primaryBright}55`,
+        borderRadius: 10, padding: '12px 14px',
+        boxShadow: '0 16px 48px rgba(0,0,0,0.8)', whiteSpace: 'nowrap',
+      }}>
+        <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 2 }}>
+          Replies de {tutor.nick}
+        </div>
+        <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 9, textTransform: 'capitalize' }}>
+          {mesLabelLongo(mes)}
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="number" min={0} autoFocus
+            style={{ ...inputBase, width: 96, padding: '7px 10px', fontSize: 13, borderColor: invalid ? '#ef4444' : C.border }}
+            value={val}
+            placeholder="—"
+            onChange={e => setVal(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onClose() }}
+          />
+          <button style={{ ...btn('ghost', 'sm'), color: C.primaryBright, borderColor: `${C.primaryBright}55`, opacity: invalid || saving ? 0.45 : 1 }}
+            disabled={invalid || saving} onClick={submit}>
+            {saving ? <Loader2 size={12} className="spin" /> : <Check size={12} />} Salvar
+          </button>
+          <button style={btn('ghost', 'sm')} onClick={onClose}><X size={12} /></button>
+        </div>
+        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 7 }}>
+          Deixe vazio para marcar como não preenchido
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ── RepliesMensalModal — preenchimento em massa do mês ────────────────────────
+function RepliesMensalModal({ open, onClose, tutores, onSaveReplies, mesInicial }) {
+  const [mes, setMes]       = useState(mesInicial || mesRefKey())
+  const [vals, setVals]     = useState({})
+  const [saving, setSaving] = useState(false)
+  const showToast           = useToast()
+
+  // 12 meses para trás a partir do mês de referência, mais recente primeiro.
+  const mesesOpcoes = useMemo(() => ultimosMeses(12).slice().reverse(), [])
+
+  const elegiveis = useMemo(() =>
+    tutores
+      .filter(t => esperaReplies(t, mes))
+      .sort((a, b) => {
+        const pa = getReplies(a, mes) === undefined ? 0 : 1
+        const pb = getReplies(b, mes) === undefined ? 0 : 1
+        return pa - pb || a.nick.localeCompare(b.nick)
+      })
+  , [tutores, mes])
+
+  // Recarrega os campos ao abrir ou trocar o mês.
+  useEffect(() => {
+    if (!open) return
+    const next = {}
+    for (const t of tutores) {
+      if (!esperaReplies(t, mes)) continue
+      const v = getReplies(t, mes)
+      next[t.nick.toLowerCase()] = v === undefined ? '' : String(v)
+    }
+    setVals(next)
+  }, [open, mes, tutores])
+
+  const pendentes = elegiveis.filter(t => repliesPendente(t, mes)).length
+
+  const dirty = useMemo(() => {
+    const payload = {}
+    for (const t of elegiveis) {
+      const nickLow = t.nick.toLowerCase()
+      const raw     = (vals[nickLow] ?? '').trim()
+      const novo    = raw === '' ? null : Number(raw)
+      if (novo !== null && (!Number.isFinite(novo) || novo < 0)) continue
+      const atual = getReplies(t, mes)
+      const atualNorm = atual === undefined ? null : atual
+      const novoNorm  = novo === null ? null : Math.round(novo)
+      if (atualNorm !== novoNorm) payload[nickLow] = { [mes]: novoNorm }
+    }
+    return payload
+  }, [vals, elegiveis, mes])
+
+  const dirtyCount = Object.keys(dirty).length
+
+  const handleSave = async () => {
+    if (!dirtyCount || saving) return
+    setSaving(true)
+    try {
+      await onSaveReplies(dirty)
+      showToast(`${dirtyCount} tutor${dirtyCount !== 1 ? 'es' : ''} atualizado${dirtyCount !== 1 ? 's' : ''} em ${mesLabel(mes)}`, 'success')
+      onClose()
+    } catch {
+      showToast('Erro ao salvar replies', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Replies do Mês" icon={Reply} maxWidth={560}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <label style={labelStyle}><Calendar size={12} /> Mês de referência</label>
+            <select style={{ ...inputBase, width: 'auto', minWidth: 170 }} value={mes} onChange={e => setMes(e.target.value)}>
+              {mesesOpcoes.map(m => (
+                <option key={m.key} value={m.key}>{mesLabelLongo(m.key)}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ marginLeft: 'auto', fontSize: 11, color: pendentes > 0 ? '#fbbf24' : '#34d399', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {pendentes > 0
+              ? <><AlertTriangle size={12} /> {pendentes} sem preenchimento</>
+              : <><Check size={12} /> mês completo</>}
+          </div>
+        </div>
+
+        <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
+          Informe a quantidade de replies de cada tutor no mês. O nível de atividade
+          (Baixa até {_cfg.baixaMax} · Moderada até {_cfg.moderadaMax} · Alta acima) é derivado desse número.
+        </div>
+
+        {elegiveis.length === 0 ? (
+          <div style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic', padding: '20px 0', textAlign: 'center' }}>
+            Nenhum tutor ativo nesse mês.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 340, overflowY: 'auto', paddingRight: 4 }}>
+            {elegiveis.map(t => {
+              const nickLow = t.nick.toLowerCase()
+              const raw     = vals[nickLow] ?? ''
+              const num     = raw.trim() === '' ? null : Number(raw)
+              const invalid = num !== null && (!Number.isFinite(num) || num < 0)
+              const nivel   = atividadeFromReplies(num === null ? undefined : Math.round(num))
+              const cor     = ATIVIDADE_COLORS[nivel]
+              const pend    = repliesPendente(t, mes)
+              return (
+                <div key={t.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  background: pend ? 'rgba(245,158,11,0.06)' : 'rgba(255,255,255,0.02)',
+                  border: `1px solid ${pend ? 'rgba(245,158,11,0.28)' : C.border}`,
+                  borderRadius: 8, padding: '7px 12px',
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: cor, flexShrink: 0, boxShadow: `0 0 6px ${cor}80` }} />
+                  <span style={{ fontSize: 12, color: C.text, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t.nick}
+                  </span>
+                  <span style={{ fontSize: 10, color: C.textMuted, flexShrink: 0 }}>{t.cargo}</span>
+                  <span style={{ fontSize: 10, color: cor, fontWeight: 600, minWidth: 74, textAlign: 'right', flexShrink: 0 }}>{nivel}</span>
+                  <input
+                    type="number" min={0} placeholder="—"
+                    style={{ ...inputBase, width: 82, padding: '5px 9px', fontSize: 12, textAlign: 'right', borderColor: invalid ? '#ef4444' : C.border }}
+                    value={raw}
+                    onChange={e => setVals(v => ({ ...v, [nickLow]: e.target.value }))}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+          {dirtyCount > 0 && (
+            <span style={{ fontSize: 11, color: C.textSoft, marginRight: 'auto' }}>
+              {dirtyCount} alteração{dirtyCount !== 1 ? 'ões' : ''} pendente{dirtyCount !== 1 ? 's' : ''}
+            </span>
+          )}
+          <button style={btn('ghost')} onClick={onClose}><X size={14} /> Cancelar</button>
+          <button style={{ ...btn('gold'), opacity: dirtyCount && !saving ? 1 : 0.45 }} disabled={!dirtyCount || saving} onClick={handleSave}>
+            {saving ? <Loader2 size={14} className="spin" /> : <Save size={14} />} Salvar
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ── TutorCard ─────────────────────────────────────────────────────────────────
-function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresenca, onOpenProfile }) {
+function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveReplies, onOpenProfile }) {
   const [hover, setHover]               = useState(false)
   const [confirmDel, setConfirmDel]     = useState(false)
-  const [confirmPresenca, setConfirmPresenca] = useState(false)
+  const [repliesOpen, setRepliesOpen]   = useState(false)
   const [copied, setCopied]             = useState(false)
 
-  const hoje = todayStr()
-  const jaRegistrou = (tutor.presencas || []).includes(hoje)
+  const mesRef       = mesRefKey()
+  const repliesCount = getReplies(tutor, mesRef)
 
   const copyNick = () => {
     navigator.clipboard.writeText(tutor.nick)
@@ -1294,9 +1514,9 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
   const hasObs          = !!tutor.obs
   const isDesligado     = tutor.cargo === 'Desligado'
   const obsDesligamento = isDesligado && hasObs
-  const diasAlerta      = isDesligado || !_cfg.atividadeAutomatica ? null : diasSemPresenca(tutor)
+  const pendente        = !isDesligado && repliesPendente(tutor, mesRef)
   const atividadeColor  = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
-  const accentColor     = isDesligado ? '#6b7280' : diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
+  const accentColor     = isDesligado ? '#6b7280' : pendente ? '#f59e0b' : emAusencia ? '#8b5cf6' : atividadeColor
 
   return (
     <div
@@ -1373,15 +1593,15 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
 
         {/* Badges */}
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', marginBottom: 11 }}>
-          {diasAlerta !== null && (
+          {pendente && (
             <span className="pulse-color" style={{
-              '--pulse-color': 'rgba(239,68,68,0.45)',
-              background: 'rgba(239,68,68,0.14)', border: '1px solid rgba(239,68,68,0.5)',
-              borderRadius: 6, color: '#f87171',
+              '--pulse-color': 'rgba(245,158,11,0.45)',
+              background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.5)',
+              borderRadius: 6, color: '#fbbf24',
               fontSize: 11, fontWeight: 700, padding: '3px 9px',
               display: 'inline-flex', alignItems: 'center', gap: 5,
             }}>
-              <AlertTriangle size={10} /> {diasAlerta}d sem presença
+              <AlertTriangle size={10} /> Preencher replies de {mesLabel(mesRef)}
             </span>
           )}
           <span style={{
@@ -1401,6 +1621,9 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
             }}>
               <span style={{ width: 5, height: 5, borderRadius: '50%', background: atividadeColor, display: 'inline-block', boxShadow: `0 0 6px ${atividadeColor}` }} />
               {getAtividade(tutor)}
+              {repliesCount !== undefined && (
+                <span style={{ color: C.textMuted, fontWeight: 500 }}>· {repliesCount} replies</span>
+              )}
             </span>
           )}
 
@@ -1531,60 +1754,30 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
             </HoverTooltip>
           )}
 
-          {/* Presença hoje */}
-          {_cfg.atividadeAutomatica && <div style={{ position: 'relative' }}>
-            {_cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste' ? (
-              <HoverTooltip content={<span style={{ fontSize: 12, color: C.textMuted }}>Presença não contabilizada — cargo fora do período de teste</span>} width={240}>
-                <button disabled style={{ ...btn('subtle', 'sm'), opacity: 0.25, cursor: 'not-allowed', color: C.textMuted, borderColor: C.border, background: 'transparent' }}>
-                  <CalendarPlus size={13} />
-                </button>
-              </HoverTooltip>
-            ) : (
-            <HoverTooltip content={<span style={{ fontSize: 12, color: C.text }}>{jaRegistrou ? 'Presença registrada hoje · clique para remover' : 'Registrar presença hoje'}</span>} width={220}>
+          {/* Replies do mês de referência */}
+          {!isDesligado && <div style={{ position: 'relative' }}>
+            <HoverTooltip width={230} content={
+              <span style={{ fontSize: 12, color: C.text }}>
+                {repliesCount === undefined
+                  ? `Informar replies de ${mesLabel(mesRef)}`
+                  : `${repliesCount} replies em ${mesLabel(mesRef)} · clique para editar`}
+              </span>
+            }>
               <button
                 style={{
                   ...btn('subtle', 'sm'),
-                  color: jaRegistrou ? '#22c55e' : C.textMuted,
-                  borderColor: jaRegistrou ? '#22c55e40' : C.border,
-                  background: jaRegistrou ? 'rgba(34,197,94,0.10)' : 'transparent',
+                  color: pendente ? '#fbbf24' : C.primaryBright,
+                  borderColor: pendente ? 'rgba(245,158,11,0.45)' : `${C.primaryBright}40`,
+                  background: pendente ? 'rgba(245,158,11,0.10)' : `${C.primaryBright}0c`,
                 }}
-                onClick={() => setConfirmPresenca(v => !v)}
+                onClick={() => setRepliesOpen(v => !v)}
               >
-                {jaRegistrou ? <CalendarCheck size={13} /> : <CalendarPlus size={13} />}
+                <Reply size={13} />
+                <span style={{ fontSize: 11, fontWeight: 700 }}>{repliesCount === undefined ? '—' : repliesCount}</span>
               </button>
             </HoverTooltip>
-            )}
-            {confirmPresenca && (
-              <>
-                <div style={{ position: 'fixed', inset: 0, zIndex: 699 }} onClick={() => setConfirmPresenca(false)} />
-                <div style={{
-                  position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
-                  zIndex: 700,
-                  background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)',
-                  border: `1px solid ${jaRegistrou ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'}`,
-                  borderRadius: 10, padding: '12px 14px',
-                  boxShadow: '0 16px 48px rgba(0,0,0,0.8)',
-                  whiteSpace: 'nowrap',
-                }}>
-                  <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 8 }}>
-                    {jaRegistrou ? 'Remover presença de hoje?' : 'Registrar presença hoje?'}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button
-                      style={jaRegistrou ? btn('danger', 'sm') : { ...btn('ghost', 'sm'), color: '#22c55e', borderColor: '#22c55e50' }}
-                      onClick={() => { onPresenca(tutor.id, !jaRegistrou); setConfirmPresenca(false) }}
-                    >
-                      <Check size={12} /> Confirmar
-                    </button>
-                    <button style={btn('ghost', 'sm')} onClick={() => setConfirmPresenca(false)}><X size={12} /></button>
-                  </div>
-                  <div style={{
-                    position: 'absolute', bottom: -7, right: 14, width: 0, height: 0,
-                    border: '7px solid transparent',
-                    borderTopColor: jaRegistrou ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)',
-                  }} />
-                </div>
-              </>
+            {repliesOpen && (
+              <RepliesPopover tutor={tutor} mes={mesRef} onSaveReplies={onSaveReplies} onClose={() => setRepliesOpen(false)} />
             )}
           </div>}
 
@@ -1633,21 +1826,21 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPrese
 }
 
 // ── TutorRow (visão lista) ────────────────────────────────────────────────────
-function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresenca, onOpenProfile }) {
+function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveReplies, onOpenProfile }) {
   const [hover, setHover]                   = useState(false)
   const [confirmDel, setConfirmDel]         = useState(false)
-  const [confirmPresenca, setConfirmPresenca] = useState(false)
+  const [repliesOpen, setRepliesOpen]       = useState(false)
   const [copied, setCopied]                 = useState(false)
 
-  const hoje        = todayStr()
-  const jaRegistrou = (tutor.presencas || []).includes(hoje)
+  const mesRef       = mesRefKey()
+  const repliesCount = getReplies(tutor, mesRef)
   const ausenciasAtivas = (tutor.ausencias || []).filter(ausenciaAtiva)
   const emAusencia  = ausenciasAtivas.length > 0
   const hasObs      = !!tutor.obs
   const isDesligado = tutor.cargo === 'Desligado'
-  const diasAlerta  = isDesligado || !_cfg.atividadeAutomatica ? null : diasSemPresenca(tutor)
+  const pendente    = !isDesligado && repliesPendente(tutor, mesRef)
   const atividadeColor = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
-  const accentColor = isDesligado ? CARGO_COLORS['Desligado'] : diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
+  const accentColor = isDesligado ? CARGO_COLORS['Desligado'] : pendente ? '#f59e0b' : emAusencia ? '#8b5cf6' : atividadeColor
 
   const copyNick = () => {
     navigator.clipboard.writeText(tutor.nick)
@@ -1743,6 +1936,9 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
           }}>
             <span style={{ width: 4, height: 4, borderRadius: '50%', background: atividadeColor, display: 'inline-block' }} />
             {getAtividade(tutor)}
+            {repliesCount !== undefined && (
+              <span style={{ color: C.textMuted, fontWeight: 500 }}>· {repliesCount}r</span>
+            )}
           </span>
         )}
 
@@ -1756,14 +1952,18 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
           </span>
         )}
 
-        {diasAlerta !== null && (
-          <span style={{
-            background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)',
-            borderRadius: 5, color: '#f87171', fontSize: 10, fontWeight: 700, padding: '2px 7px',
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-          }}>
-            <AlertTriangle size={9} /> {diasAlerta}d
-          </span>
+        {pendente && (
+          <HoverTooltip side="top" width={210} content={
+            <span style={{ fontSize: 12, color: C.text }}>Replies de {mesLabel(mesRef)} não informadas</span>
+          }>
+            <span style={{
+              background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)',
+              borderRadius: 5, color: '#fbbf24', fontSize: 10, fontWeight: 700, padding: '2px 7px',
+              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'default',
+            }}>
+              <AlertTriangle size={9} /> replies
+            </span>
+          </HoverTooltip>
         )}
       </div>
 
@@ -1840,51 +2040,27 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onPresen
           </HoverTooltip>
         )}
 
-        {/* Presença */}
-        {_cfg.atividadeAutomatica && <div style={{ position: 'relative' }}>
-          {_cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste' ? (
-            <HoverTooltip width={240} side="top" content={<span style={{ fontSize: 12, color: C.textMuted }}>Presença não contabilizada — cargo fora do período de teste</span>}>
-              <button disabled style={{ ...btn('subtle', 'sm'), opacity: 0.25, cursor: 'not-allowed', color: C.textMuted, borderColor: C.border, background: 'transparent' }}>
-                <CalendarPlus size={13} />
-              </button>
-            </HoverTooltip>
-          ) : (
-          <HoverTooltip width={220} side="top" content={
+        {/* Replies do mês de referência */}
+        {!isDesligado && <div style={{ position: 'relative' }}>
+          <HoverTooltip width={230} side="top" content={
             <span style={{ fontSize: 12, color: C.text }}>
-              {jaRegistrou ? 'Presença registrada hoje · clique para remover' : 'Registrar presença hoje'}
+              {repliesCount === undefined
+                ? `Informar replies de ${mesLabel(mesRef)}`
+                : `${repliesCount} replies em ${mesLabel(mesRef)} · clique para editar`}
             </span>
           }>
             <button style={{
               ...btn('subtle', 'sm'),
-              color: jaRegistrou ? '#22c55e' : C.textMuted,
-              borderColor: jaRegistrou ? '#22c55e40' : C.border,
-              background: jaRegistrou ? 'rgba(34,197,94,0.10)' : 'transparent',
-            }} onClick={() => setConfirmPresenca(v => !v)}>
-              {jaRegistrou ? <CalendarCheck size={13} /> : <CalendarPlus size={13} />}
+              color: pendente ? '#fbbf24' : C.primaryBright,
+              borderColor: pendente ? 'rgba(245,158,11,0.45)' : `${C.primaryBright}40`,
+              background: pendente ? 'rgba(245,158,11,0.10)' : `${C.primaryBright}0c`,
+            }} onClick={() => setRepliesOpen(v => !v)}>
+              <Reply size={13} />
+              <span style={{ fontSize: 11, fontWeight: 700 }}>{repliesCount === undefined ? '—' : repliesCount}</span>
             </button>
           </HoverTooltip>
-          )}
-          {confirmPresenca && (
-            <>
-              <div style={{ position: 'fixed', inset: 0, zIndex: 699 }} onClick={() => setConfirmPresenca(false)} />
-              <div style={{
-                position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, zIndex: 700,
-                background: 'rgba(8,7,22,0.97)', backdropFilter: 'blur(16px)',
-                border: `1px solid ${jaRegistrou ? 'rgba(239,68,68,0.4)' : 'rgba(34,197,94,0.4)'}`,
-                borderRadius: 10, padding: '12px 14px', boxShadow: '0 16px 48px rgba(0,0,0,0.8)', whiteSpace: 'nowrap',
-              }}>
-                <div style={{ fontSize: 12, color: C.text, fontWeight: 600, marginBottom: 8 }}>
-                  {jaRegistrou ? 'Remover presença de hoje?' : 'Registrar presença hoje?'}
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button style={jaRegistrou ? btn('danger', 'sm') : { ...btn('ghost', 'sm'), color: '#22c55e', borderColor: '#22c55e50' }}
-                    onClick={() => { onPresenca(tutor.id, !jaRegistrou); setConfirmPresenca(false) }}>
-                    <Check size={12} /> Confirmar
-                  </button>
-                  <button style={btn('ghost', 'sm')} onClick={() => setConfirmPresenca(false)}><X size={12} /></button>
-                </div>
-              </div>
-            </>
+          {repliesOpen && (
+            <RepliesPopover tutor={tutor} mes={mesRef} onSaveReplies={onSaveReplies} onClose={() => setRepliesOpen(false)} />
           )}
         </div>}
 
@@ -2042,81 +2218,6 @@ const FILTER_TABS = [
   { key: 'inativos', label: 'Inativos / Desligados' },
 ]
 
-// ── parseChatLog — extrai nomes únicos de um log de canal (HH:MM:SS Nome [nível]: msg) ──
-function parseChatLog(text) {
-  const re = /^\d{2}:\d{2}:\d{2}\s+(.+?)\s+\[\d+\]:/gm
-  const nomes = new Set()
-  let m
-  while ((m = re.exec(text)) !== null) {
-    const nome = m[1].trim()
-    if (nome) nomes.add(nome)
-  }
-  return [...nomes]
-}
-
-// ── parseChatLogFull — extrai nomes + detecta virada de meia-noite ──────────
-function parseChatLogFull(text) {
-  const re = /^(\d{2}):(\d{2}):\d{2}\s+(.+?)\s+\[\d+\]:\s*(.*)/gm
-  const nomes = new Set()
-  const beforeMidnight  = new Set()
-  const afterMidnight   = new Set()
-  const mensagensPorNick = {}   // objeto simples: nickLow → [{time, text, depois}]
-  let crossedMidnight = false
-  let prevMinutes = -1
-  let m
-  while ((m = re.exec(text)) !== null) {
-    const minutes = +m[1] * 60 + +m[2]
-    if (!crossedMidnight && prevMinutes >= 0 && minutes < prevMinutes - 60)
-      crossedMidnight = true
-    const nick = m[3].trim()
-    if (!nick) { prevMinutes = minutes; continue }
-    const nickLow = nick.toLowerCase()
-    nomes.add(nick)
-    if (crossedMidnight) afterMidnight.add(nickLow)
-    else beforeMidnight.add(nickLow)
-    if (!mensagensPorNick[nickLow]) mensagensPorNick[nickLow] = []
-    mensagensPorNick[nickLow].push({ time: `${m[1]}:${m[2]}`, text: (m[4] || '').trim(), depois: crossedMidnight })
-    prevMinutes = minutes
-  }
-  return { nomes, spansMidnight: crossedMidnight, beforeMidnight, afterMidnight, mensagensPorNick }
-}
-
-// ── ImportModal ───────────────────────────────────────────────────────────────
-function parseExcelDate(serial) {
-  if (!serial || typeof serial !== 'number') return ''
-  const ms = (serial - 25569) * 86400 * 1000
-  const d  = new Date(ms)
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
-}
-
-function normalizeHorario(h) {
-  if (!h || typeof h !== 'string') return '?'
-  return h
-    .replace(/Manha/g, 'Manhã')
-    .replace(/manha/g, 'Manhã')
-    .replace(/Tarde/g, 'Tarde')
-    .replace(/Noite/g, 'Noite')
-    .trim()
-}
-
-function parseXlsxRows(rows) {
-  const header = rows.findIndex(r => r[1] === 'Cargo' && r[4] === 'Nick')
-  if (header === -1) return { rows: [], skipped: 0 }
-  const candidates = rows.slice(header + 1).filter(r => r[4] && String(r[4]).trim()).map(r => ({
-    cargo:         String(r[1] || 'Tutor').trim(),
-    celular:       r[2] ? formatCelular(String(r[2]).replace(/\D/g, '')) : '',
-    nomeRL:        r[3] ? String(r[3]).trim() : '',
-    nick:          String(r[4]).trim(),
-    atividade:     r[5] ? String(r[5]).trim() : '',
-    dataInicio:    parseExcelDate(r[6]),
-    horarios:      normalizeHorario(r[9]),
-    detalheHorario:r[10] ? String(r[10]).trim() : '',
-    obs:           r[11] ? String(r[11]).trim() : '',
-  }))
-  const valid = candidates.filter(r => CARGOS.includes(r.cargo))
-  return { rows: valid, skipped: candidates.length - valid.length }
-}
-
 const CARGO_BADGE_COLOR = { Sênior: C.teal, Tutor: C.gold, 'Em Teste': '#3b82f6', Inativo: '#6b7280', Desligado: '#ef4444' }
 
 function ImportModal({ open, onClose, tutores, onImport }) {
@@ -2155,10 +2256,10 @@ function ImportModal({ open, onClose, tutores, onImport }) {
     const novos = rows.map((r, i) => ({
       id: maxId + i + 1,
       nick: r.nick, nomeRL: r.nomeRL, celular: r.celular,
-      discord: '', cargo: r.cargo, atividade: r.atividade || '',
+      discord: '', cargo: r.cargo,
       dataInicio: r.dataInicio, horarios: r.horarios,
       detalheHorario: r.detalheHorario, obs: r.obs,
-      presencas: [], ausencias: [], dataEfetivacao: '',
+      ausencias: [], dataEfetivacao: '',
     }))
     onImport(novos)
     onClose()
@@ -2269,22 +2370,24 @@ function dateToExcelSerial(dateStr) {
 
 function ExportModal({ open, onClose, tutores }) {
   const handleDownload = () => {
-    const header = ['#', 'Cargo', 'Celular', 'Nome RL', 'Nick', 'Atividade', 'Data Início', '', '', 'Horário', 'Detalhe Horário', 'Obs']
+    const mesRef = mesRefKey()
+    const header = ['#', 'Cargo', 'Celular', 'Nome RL', 'Nick', 'Atividade', 'Data Início', '', '', 'Horário', 'Detalhe Horário', 'Obs', `Replies ${mesLabel(mesRef)}`]
     const rows = tutores.map((t, i) => [
       i + 1,
       t.cargo || '',
       t.celular || '',
       t.nomeRL || '',
       t.nick || '',
-      t.atividade || '',
+      getAtividade(t),
       dateToExcelSerial(t.dataInicio),
       '', '',
       t.horarios || '',
       t.detalheHorario || '',
       t.obs || '',
+      getReplies(t, mesRef) ?? '',
     ])
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
-    ws['!cols'] = [{ wch: 4 }, { wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, {}, {}, { wch: 14 }, { wch: 20 }, { wch: 30 }]
+    ws['!cols'] = [{ wch: 4 }, { wch: 12 }, { wch: 14 }, { wch: 20 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, {}, {}, { wch: 14 }, { wch: 20 }, { wch: 30 }, { wch: 14 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Tutores')
     XLSX.writeFile(wb, `tutores-${new Date().toISOString().slice(0, 10)}.xlsx`)
@@ -2314,7 +2417,7 @@ function ExportModal({ open, onClose, tutores }) {
                 </td>
                 <td style={{ padding: '7px 12px', color: C.gold, fontWeight: 600 }}>{t.nick}</td>
                 <td style={{ padding: '7px 12px', color: C.textSoft }}>{t.nomeRL || '—'}</td>
-                <td style={{ padding: '7px 12px', color: C.textSoft }}>{t.atividade || '—'}</td>
+                <td style={{ padding: '7px 12px', color: C.textSoft }}>{getAtividade(t)}</td>
                 <td style={{ padding: '7px 12px', color: C.textSoft }}>{t.horarios || '—'}</td>
               </tr>
             ))}
@@ -2339,7 +2442,7 @@ function ExportModal({ open, onClose, tutores }) {
   )
 }
 
-function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
+function CadastroTab({ tutores, setTutores, cfg, replies, onSaveReplies, pendingAuditRef }) {
   const [modalOpen, setModalOpen]   = useState(false)
   const [editId, setEditId]         = useState(null)
   const [ausenciaId, setAusenciaId] = useState(null)
@@ -2347,13 +2450,7 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
   const [importOpen, setImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [profileId, setProfileId]   = useState(null)
-  const [repliesData, setRepliesData] = useState({})
-
-  useEffect(() => {
-    apiFetch('/api/replies').then(r => r.json()).then(d => {
-      if (d && !d.error) setRepliesData(d)
-    }).catch(() => {})
-  }, [])
+  const [repliesMesOpen, setRepliesMesOpen] = useState(false)
   const [search, setSearch]         = useState('')
   const [viewMode, setViewMode]     = useState('list')
   const [filterTab, setFilterTab]   = useState('ativos')
@@ -2378,17 +2475,6 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
         return { ...t, obs: text, obsHistorico: [...(t.obsHistorico || []), entrada] }
       }
       return { ...t, obs: text }
-    }))
-  }
-  const handlePresenca    = (id, add) => {
-    const hoje = todayStr()
-    const tutor = tutores.find(t => t.id === id)
-    if (pendingAuditRef) pendingAuditRef.current = { action: add ? 'presenca_add' : 'presenca_remove', nick: tutor?.nick, details: { data: hoje } }
-    setTutores(prev => prev.map(t => {
-      if (t.id !== id) return t
-      const presencas = t.presencas || []
-      // Zera campos computados para forçar recálculo local até próximo sync
-      return { ...t, presencas: add ? [...new Set([...presencas, hoje])] : presencas.filter(d => d !== hoje), atividadeCalculada: null, apto: null }
     }))
   }
   const handleAusencia    = (tutorId, novaAusencia, removeId, fromHistorico = false) => {
@@ -2419,17 +2505,16 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
   const obsTutor      = obsId     !== null  ? tutores.find(t => t.id === obsId)      : null
   const profileTutor  = profileId !== null  ? tutores.find(t => t.id === profileId)  : null
 
+  const mesRef = mesRefKey()
+
   const stats = useMemo(() => {
-    const hoje   = todayStr()
     const ativos   = tutores.filter(t => t.cargo === 'Sênior' || t.cargo === 'Tutor' || t.cargo === 'Em Teste')
     const ausentes = ativos.filter(t => (t.ausencias || []).some(ausenciaAtiva))
-    const alertas  = ativos.filter(t => getAtividade(t) === 'Baixa' || getAtividade(t) === 'Não Definida')
-    const emTeste = ativos.filter(t => t.cargo === 'Em Teste').length
-    const comPresenca = _cfg.presencaApenasEmTeste ? ativos.filter(t => t.cargo === 'Em Teste') : ativos
-    const naoAptos = _cfg.presencaApenasEmTeste ? ativos.length - emTeste : 0
-    const presencasHoje = comPresenca.filter(t => (t.presencas || []).includes(hoje)).length
-    return { total: tutores.length, ativos: ativos.length, ausentes: ausentes.length, alertas: alertas.length, presencasHoje, emTeste, naoAptos }
-  }, [tutores, cfg])
+    const alertas  = ativos.filter(t => getAtividade(t) === 'Baixa')
+    const pendentes = tutores.filter(t => repliesPendente(t, mesRef)).length
+    const totalReplies = ativos.reduce((sum, t) => sum + (getReplies(t, mesRef) || 0), 0)
+    return { total: tutores.length, ativos: ativos.length, ausentes: ausentes.length, alertas: alertas.length, pendentes, totalReplies }
+  }, [tutores, cfg, replies, mesRef])
 
   const ATIVIDADE_ORDER = { 'Alta': 0, 'Moderada': 1, 'Baixa': 2, 'Não Definida': 3 }
 
@@ -2454,14 +2539,43 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: _cfg.atividadeAutomatica ? 'repeat(5, 1fr) 1.4fr' : 'repeat(4, 1fr) 1.4fr', gap: 12, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr) 1.4fr', gap: 12, marginBottom: 24 }}>
         <StatPill icon={Users}         label="Total"           value={stats.total}         color={C.gold} />
         <StatPill icon={UserCheck}     label="Ativos"          value={stats.ativos}        color="#10b981" sub="Tutor + Em Teste" />
-        {_cfg.atividadeAutomatica && <StatPill icon={CalendarCheck} label="Presenças Hoje"  value={stats.presencasHoje} color={C.teal} sub={_cfg.presencaApenasEmTeste ? `de ${stats.emTeste} em teste` : `de ${stats.ativos} ativos`} />}
+        <StatPill icon={Reply}         label={`Replies ${mesLabel(mesRef)}`} value={stats.totalReplies} color={C.teal} sub={`somadas · ${stats.ativos} ativos`} />
         <StatPill icon={Palmtree}      label="Em Ausência"     value={stats.ausentes}      color="#8b5cf6" />
-        <StatPill icon={AlertTriangle} label="Atenção"         value={stats.alertas}       color="#f97316" sub="baixa atividade" />
+        <StatPill icon={AlertTriangle} label="Atenção"         value={stats.alertas}       color="#f97316" sub="atividade baixa" />
         <AtividadeBar tutores={tutores} />
       </div>
+
+      {/* Aviso de replies pendentes do mês de referência */}
+      {stats.pendentes > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14,
+          background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.35)',
+          borderRadius: 12, padding: '12px 16px',
+        }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+            background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Reply size={14} color="#fbbf24" />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#fbbf24', marginBottom: 2, textTransform: 'capitalize' }}>
+              Replies de {mesLabelLongo(mesRef)} pendentes
+            </div>
+            <div style={{ fontSize: 11, color: C.textSoft }}>
+              {stats.pendentes} tutor{stats.pendentes !== 1 ? 'es' : ''} sem número informado — a atividade fica "Não Definida" até o preenchimento.
+            </div>
+          </div>
+          <button style={{ ...btn('subtle'), color: '#fbbf24', borderColor: 'rgba(245,158,11,0.45)', background: 'rgba(245,158,11,0.10)', flexShrink: 0 }}
+            onClick={() => setRepliesMesOpen(true)}>
+            <ListChecks size={14} /> Preencher
+          </button>
+        </div>
+      )}
 
       {/* Search + botões */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -2474,6 +2588,9 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
+        <button style={btn('subtle')} onClick={() => setRepliesMesOpen(true)}>
+          <Reply size={15} /> Replies do Mês
+        </button>
         <button style={btn('subtle')} onClick={() => setImportOpen(true)}>
           <ClipboardList size={15} /> Importar
         </button>
@@ -2552,7 +2669,7 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
               onDelete={handleDelete}
               onOpenAusencia={id => setAusenciaId(id)}
               onOpenObs={id => setObsId(id)}
-              onPresenca={handlePresenca}
+              onSaveReplies={onSaveReplies}
               onOpenProfile={id => setProfileId(id)}
             />
           ))}
@@ -2566,7 +2683,7 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
               onDelete={handleDelete}
               onOpenAusencia={id => setAusenciaId(id)}
               onOpenObs={id => setObsId(id)}
-              onPresenca={handlePresenca}
+              onSaveReplies={onSaveReplies}
               onOpenProfile={id => setProfileId(id)}
             />
           ))}
@@ -2593,6 +2710,14 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
         tutores={tutores}
       />
 
+      <RepliesMensalModal
+        open={repliesMesOpen}
+        onClose={() => setRepliesMesOpen(false)}
+        tutores={tutores}
+        onSaveReplies={onSaveReplies}
+        mesInicial={mesRef}
+      />
+
       <AusenciaModal
         tutor={ausenciaTutor}
         open={ausenciaId !== null}
@@ -2616,7 +2741,8 @@ function CadastroTab({ tutores, setTutores, cfg, pendingAuditRef }) {
         onClose={() => setProfileId(null)}
         onDeleteObsHistorico={handleDeleteObsHistorico}
         onDeleteAusenciaHistorico={(tutorId, id) => handleAusencia(tutorId, null, id, true)}
-        repliesData={repliesData}
+        replies={replies}
+        onSaveReplies={onSaveReplies}
       />
     </div>
   )
@@ -2878,6 +3004,7 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meIn
               const inicio = m.dataInicio ? new Date(m.dataInicio + 'T00:00:00') : null
               const diaI = inicio ? inicio.getDate() : null
               const isExtra = diaI !== null && diaI >= 16
+                && inicio.getMonth() === mesAtual && inicio.getFullYear() === anoAtual
 
               return (
                 <div key={m.id} style={{
@@ -3025,214 +3152,47 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meIn
   )
 }
 
-// ── GeralView ────────────────────────────────────────────────────────────────
-function GeralView({ ativos, currentMonthKey }) {
-  const hoje = new Date()
-  const totalDays = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
-  const todayDate = todayStr()
-
-  // Por dia do mês: quantos tutores estiveram presentes
-  const dayData = useMemo(() => Array.from({ length: totalDays }, (_, i) => {
-    const day  = String(i + 1).padStart(2, '0')
-    const date = `${currentMonthKey}-${day}`
-    const count = ativos.filter(t => (t.presencas || []).includes(date)).length
-    return { day: i + 1, date, count, future: date > todayDate }
-  }), [ativos, currentMonthKey, totalDays, todayDate])
-
-  // Ranking: tutores ordenados por presenças no mês atual
-  const ranking = useMemo(() => [...ativos]
-    .map(t => ({
-      nick: t.nick,
-      count: (t.presencas || []).filter(d => d.startsWith(currentMonthKey)).length,
-      atividade: getAtividade(t),
-    }))
-    .sort((a, b) => b.count - a.count)
-  , [ativos, currentMonthKey])
-
-  const maxCount = Math.max(...ranking.map(r => r.count), 1)
-  const daysPassados = dayData.filter(d => !d.future).length
-
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: 28, alignItems: 'start' }}>
-
-      {/* Calendário do mês */}
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 600, color: C.textSoft, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 12 }}>
-          Cobertura do Mês — tutores por dia
-        </div>
-
-        {/* Cabeçalho dias da semana */}
-        {(() => {
-          const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
-          const [ano, mes] = currentMonthKey.split('-').map(Number)
-          const firstWeekday = new Date(ano, mes - 1, 1).getDay()
-          const blanks = Array.from({ length: firstWeekday })
-
-          return (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 32px)', gap: 4 }}>
-              {/* Labels */}
-              {WEEKDAYS.map(w => (
-                <div key={w} style={{ fontSize: 9, fontWeight: 600, color: C.textMuted, textAlign: 'center', paddingBottom: 4, textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                  {w}
-                </div>
-              ))}
-              {/* Células vazias antes do dia 1 */}
-              {blanks.map((_, i) => <div key={`b${i}`} />)}
-              {/* Dias */}
-              {dayData.map(d => {
-                const pct    = ativos.length ? d.count / ativos.length : 0
-                const bg     = d.future ? 'rgba(255,255,255,0.03)'
-                             : d.count === 0 ? 'rgba(239,68,68,0.15)'
-                             : pct < 0.35    ? 'rgba(249,115,22,0.22)'
-                             : pct < 0.65    ? 'rgba(234,179,8,0.22)'
-                             : 'rgba(34,197,94,0.22)'
-                const border = d.future ? 'rgba(255,255,255,0.04)'
-                             : d.count === 0 ? 'rgba(239,68,68,0.35)'
-                             : pct < 0.35    ? 'rgba(249,115,22,0.45)'
-                             : pct < 0.65    ? 'rgba(234,179,8,0.45)'
-                             : 'rgba(34,197,94,0.45)'
-                const textColor = d.future ? 'rgba(255,255,255,0.1)'
-                                : d.count === 0 ? 'rgba(239,68,68,0.55)'
-                                : 'rgba(255,255,255,0.75)'
-                const isToday = d.date === todayDate
-                return (
-                  <div key={d.date} title={d.future ? '' : `${d.count} tutor${d.count !== 1 ? 'es' : ''} presente${d.count !== 1 ? 's' : ''}`} style={{
-                    width: 32, height: 32, borderRadius: 7,
-                    background: bg,
-                    border: isToday ? `2px solid rgba(99,102,241,0.7)` : `1px solid ${border}`,
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                    cursor: d.future ? 'default' : 'default',
-                    boxShadow: isToday ? '0 0 8px rgba(99,102,241,0.3)' : 'none',
-                  }}>
-                    <span style={{ fontSize: 10, fontWeight: isToday ? 700 : 500, color: isToday ? C.primaryBright : textColor, lineHeight: 1 }}>{d.day}</span>
-                    {!d.future && <span style={{ fontSize: 8, color: textColor, lineHeight: 1, marginTop: 1, opacity: .85 }}>{d.count}</span>}
-                  </div>
-                )
-              })}
-            </div>
-          )
-        })()}
-
-        {/* Legenda */}
-        <div style={{ display: 'flex', gap: 12, marginTop: 10, flexWrap: 'wrap' }}>
-          {[
-            { color: 'rgba(239,68,68,0.6)',  label: '0 tutores' },
-            { color: 'rgba(249,115,22,0.7)', label: '< 35%' },
-            { color: 'rgba(234,179,8,0.7)',  label: '35–65%' },
-            { color: 'rgba(34,197,94,0.7)',  label: '> 65%' },
-          ].map(l => (
-            <span key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: C.textMuted }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: l.color, display: 'inline-block' }} />
-              {l.label}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Ranking de presença */}
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 600, color: C.textSoft, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 12 }}>
-          Ranking do Mês — {daysPassados} dias passados
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-          {ranking.map((r, i) => {
-            const pct = r.count / Math.max(daysPassados, 1)
-            const color = ATIVIDADE_COLORS[r.atividade] || C.textMuted
-            return (
-              <div key={r.nick} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 10, color: C.textMuted, width: 14, textAlign: 'right', flexShrink: 0 }}>{i + 1}</span>
-                <span style={{ fontSize: 12, color: C.text, width: 160, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nick}</span>
-                <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${(r.count / maxCount) * 100}%`, background: color, borderRadius: 3, transition: 'width .3s', boxShadow: `0 0 6px ${color}60` }} />
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 700, color, width: 28, textAlign: 'right', flexShrink: 0 }}>{r.count}d</span>
-                <span style={{ fontSize: 10, color: C.textMuted, width: 32, flexShrink: 0 }}>{Math.round(pct * 100)}%</span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── DashboardTab ──────────────────────────────────────────────────────────────
-// ── PresencaHistoricoChart ────────────────────────────────────────────────────
-function PresencaHistoricoChart({ tutores, presencaApenasEmTeste }) {
+// ── RepliesHistoricoChart — replies mensais, geral e por tutor ────────────────
+function RepliesHistoricoChart({ tutores }) {
   const [selected, setSelected] = useState('geral')
 
   const ativos = useMemo(() =>
     tutores.filter(t => t.cargo === 'Sênior' || t.cargo === 'Tutor' || t.cargo === 'Em Teste')
   , [tutores])
 
-  // Para a visão geral (heatmap/ranking): só Em Teste quando flag ativa
-  const ativosGeral = useMemo(() =>
-    presencaApenasEmTeste ? tutores.filter(t => t.cargo === 'Em Teste') : ativos
-  , [ativos, tutores, presencaApenasEmTeste])
-
-  const meses = useMemo(() => {
-    const hoje = new Date()
-    return Array.from({ length: 6 }, (_, i) => {
-      const d = new Date(hoje.getFullYear(), hoje.getMonth() - (5 - i), 1)
-      return {
-        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-        label: d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
-      }
-    })
-  }, [])
-
-  const currentMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })()
+  const mesRef = mesRefKey()
+  const meses  = useMemo(() => ultimosMeses(6, mesRef), [mesRef])
   const tutorSelecionado = selected !== 'geral' ? ativos.find(t => String(t.id) === selected) : null
-  const isNaoEmTeste = !!(tutorSelecionado && presencaApenasEmTeste && tutorSelecionado.cargo !== 'Em Teste')
-
-  const ATIV_NUM = { 'Alta': 4, 'Moderada': 3, 'Baixa': 2, 'Não Definida': 1 }
 
   const chartData = useMemo(() => {
     if (selected === 'geral') {
-      return meses.map(m => {
-        let total = 0
-        ativosGeral.forEach(t => { total += (t.presencas || []).filter(d => d.startsWith(m.key)).length })
-        return { name: m.label, presencas: total }
-      })
+      return meses.map(m => ({
+        key: m.key,
+        name: m.label,
+        replies: ativos.reduce((sum, t) => sum + (getReplies(t, m.key) || 0), 0),
+      }))
     }
-    const startMonth = tutorSelecionado?.dataInicio?.slice(0, 7) || null
+    const startMonth    = tutorSelecionado?.dataInicio?.slice(0, 7) || null
     const mesesVisiveis = startMonth ? meses.filter(m => m.key >= startMonth) : meses
-    if (isNaoEmTeste) {
-      return mesesVisiveis.map(m => {
-        const historico = tutorSelecionado?.atividadeHistorico || []
-        const entrada = historico.find(h => h.mes === m.key)
-        const atv = m.key === currentMonthKey
-          ? (tutorSelecionado?.atividade || 'Não Definida')
-          : (entrada?.atividade || null)
-        return { name: m.label, valor: atv ? (ATIV_NUM[atv] || 0) : 0, atividade: atv || 'Sem dados' }
-      })
-    }
-    return mesesVisiveis.map(m => ({
-      name: m.label,
-      presencas: tutorSelecionado ? (tutorSelecionado.presencas || []).filter(d => d.startsWith(m.key)).length : 0,
-    }))
-  }, [meses, selected, ativosGeral, tutorSelecionado, isNaoEmTeste, currentMonthKey])
-
-  const currentMonthInfo = useMemo(() => {
-    if (!tutorSelecionado || isNaoEmTeste) return null
-    const hoje      = new Date()
-    const totalDays = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate()
-    const marked    = new Set((tutorSelecionado.presencas || []).filter(d => d.startsWith(currentMonthKey)))
-    const days = Array.from({ length: totalDays }, (_, i) => {
-      const day  = String(i + 1).padStart(2, '0')
-      const date = `${currentMonthKey}-${day}`
-      return { date, day: i + 1, marked: marked.has(date), future: date > todayStr() }
+    return mesesVisiveis.map(m => {
+      const n = tutorSelecionado ? getReplies(tutorSelecionado, m.key) : undefined
+      return { key: m.key, name: m.label, replies: n ?? 0, preenchido: n !== undefined }
     })
-    return { days, count: marked.size, totalDays }
-  }, [tutorSelecionado, currentMonthKey, isNaoEmTeste])
+  }, [meses, selected, ativos, tutorSelecionado])
 
-  const atividade = tutorSelecionado ? getAtividade(tutorSelecionado) : null
+  // Ranking do mês de referência
+  const ranking = useMemo(() => [...ativos]
+    .map(t => ({ nick: t.nick, count: getReplies(t, mesRef), atividade: getAtividade(t) }))
+    .sort((a, b) => (b.count ?? -1) - (a.count ?? -1))
+  , [ativos, mesRef])
+
+  const maxCount = Math.max(...ranking.map(r => r.count || 0), 1)
 
   const REGRAS = [
-    { label: 'Não Definida', range: '0 dias',  color: ATIVIDADE_COLORS['Não Definida'] },
-    { label: 'Baixa',        range: '1–7 dias', color: ATIVIDADE_COLORS.Baixa },
-    { label: 'Moderada',     range: '8–15 dias',color: ATIVIDADE_COLORS.Moderada },
-    { label: 'Alta',         range: '16+ dias', color: ATIVIDADE_COLORS.Alta },
+    { label: 'Não Definida', range: 'sem dados',                     color: ATIVIDADE_COLORS['Não Definida'] },
+    { label: 'Baixa',        range: `até ${_cfg.baixaMax}`,          color: ATIVIDADE_COLORS.Baixa },
+    { label: 'Moderada',     range: `${_cfg.baixaMax + 1}–${_cfg.moderadaMax}`, color: ATIVIDADE_COLORS.Moderada },
+    { label: 'Alta',         range: `${_cfg.moderadaMax + 1}+`,      color: ATIVIDADE_COLORS.Alta },
   ]
 
   return (
@@ -3243,7 +3203,7 @@ function PresencaHistoricoChart({ tutores, presencaApenasEmTeste }) {
           <BarChart2 size={13} color={C.primaryBright} />
         </div>
         <h3 style={{ fontFamily: 'Cinzel, serif', color: C.text, fontSize: 13, fontWeight: 600, flex: 1 }}>
-          {isNaoEmTeste ? 'Histórico de Atividade' : 'Histórico de Presenças'}
+          Histórico de Replies
         </h3>
         <select
           style={{ ...inputBase, width: 'auto', minWidth: 200, padding: '6px 12px', fontSize: 12 }}
@@ -3255,9 +3215,9 @@ function PresencaHistoricoChart({ tutores, presencaApenasEmTeste }) {
         </select>
       </div>
 
-      {/* Legenda das regras */}
+      {/* Legenda das faixas */}
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16, paddingBottom: 14, borderBottom: `1px solid ${C.border}` }}>
-        <span style={{ fontSize: 10, color: C.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', alignSelf: 'center' }}>Regras / mês:</span>
+        <span style={{ fontSize: 10, color: C.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', alignSelf: 'center' }}>Faixas / mês:</span>
         {REGRAS.map(r => (
           <span key={r.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
             <span style={{ width: 7, height: 7, borderRadius: 2, background: r.color, display: 'inline-block', boxShadow: `0 0 5px ${r.color}60` }} />
@@ -3265,81 +3225,54 @@ function PresencaHistoricoChart({ tutores, presencaApenasEmTeste }) {
             <span style={{ color: C.textMuted }}>= {r.range}</span>
           </span>
         ))}
-        <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 'auto', alignSelf: 'center', fontStyle: 'italic' }}>reinicia todo dia 1º</span>
+        <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 'auto', alignSelf: 'center', fontStyle: 'italic' }}>
+          referência: {mesLabel(mesRef)}
+        </span>
       </div>
 
-      {/* Visão Geral — heatmap + ranking */}
-      {selected === 'geral' ? (
-        <GeralView ativos={ativosGeral} currentMonthKey={currentMonthKey} />
-      ) : (
-        <>
-        {/* Gráfico barras — últimos 6 meses */}
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-            <XAxis dataKey="name" tick={{ fill: C.textSoft, fontSize: 11 }} />
-            {isNaoEmTeste
-              ? <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} domain={[0, 4]} ticks={[1,2,3,4]} tickFormatter={v => (['','Nd','Bx','Md','Al'][v] || '')} />
-              : <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} allowDecimals={false} />
-            }
-            <Tooltip content={isNaoEmTeste ? <AtividadeTooltip /> : <RechartTooltip />} />
-            {isNaoEmTeste ? (
-              <Bar dataKey="valor" name="Atividade" radius={[5, 5, 0, 0]}>
-                {chartData.map((d, i) => {
-                  const color = ATIVIDADE_COLORS[d.atividade] || C.textMuted
-                  return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
-                })}
-              </Bar>
-            ) : (
-              <Bar dataKey="presencas" name="Dias presente" radius={[5, 5, 0, 0]}>
-                {chartData.map((d, i) => {
-                  const color = d.presencas === 0           ? ATIVIDADE_COLORS['Não Definida']
-                              : d.presencas <= _cfg.baixaMax    ? ATIVIDADE_COLORS.Baixa
-                              : d.presencas <= _cfg.moderadaMax ? ATIVIDADE_COLORS.Moderada
-                              : ATIVIDADE_COLORS.Alta
-                  return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
-                })}
-              </Bar>
-            )}
-          </BarChart>
-        </ResponsiveContainer>
-        </>
-      )}
+      {/* Gráfico de barras — últimos 6 meses */}
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+          <XAxis dataKey="name" tick={{ fill: C.textSoft, fontSize: 11 }} />
+          <YAxis tick={{ fill: C.textSoft, fontSize: 11 }} allowDecimals={false} />
+          <Tooltip content={<RechartTooltip />} />
+          <Bar dataKey="replies" name="Replies" radius={[5, 5, 0, 0]}>
+            {chartData.map((d, i) => {
+              const color = selected === 'geral'
+                ? C.primaryBright
+                : (d.preenchido ? ATIVIDADE_COLORS[atividadeFromReplies(d.replies)] : ATIVIDADE_COLORS['Não Definida'])
+              return <Cell key={i} fill={i === chartData.length - 1 ? color : `${color}90`} />
+            })}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
 
-      {/* Calendário do mês atual — só para tutor individual */}
-      {selected !== 'geral' && currentMonthInfo && (
+      {/* Ranking do mês de referência */}
+      {selected === 'geral' && (
         <div style={{ marginTop: 18, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: C.textSoft, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.07em' }}>
-              Mês atual — {currentMonthInfo.count} / {currentMonthInfo.totalDays} dias
-            </span>
-            {atividade && <Badge label={atividade} colorMap={ATIVIDADE_COLORS} />}
-            <span style={{ fontSize: 11, color: C.textMuted }}>
-              {(() => {
-                const c = currentMonthInfo.count
-                if (c < 8)  return `${8  - c} dias para Moderada`
-                if (c < 16) return `${16 - c} dias para Alta`
-                return <span style={{ color: ATIVIDADE_COLORS.Alta }}>✓ Atividade Alta atingida</span>
-              })()}
-            </span>
+          <div style={{ fontSize: 11, fontWeight: 600, color: C.textSoft, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 12 }}>
+            Ranking de {mesLabel(mesRef)}
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {currentMonthInfo.days.map(d => (
-              <div key={d.date} title={d.date} style={{
-                width: 28, height: 28, borderRadius: 6,
-                background: d.future ? 'rgba(255,255,255,0.02)'
-                  : d.marked ? `${C.primaryBright}28` : 'rgba(255,255,255,0.04)',
-                border: d.future ? `1px solid rgba(255,255,255,0.04)`
-                  : d.marked ? `1px solid ${C.primaryBright}55` : `1px solid rgba(255,255,255,0.07)`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, fontWeight: d.marked ? 700 : 400,
-                color: d.future ? 'rgba(255,255,255,0.12)'
-                  : d.marked ? C.primaryBright : C.textMuted,
-                boxShadow: d.marked ? `0 0 8px ${C.primaryBright}30` : 'none',
-              }}>
-                {d.day}
-              </div>
-            ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {ranking.length === 0 && (
+              <span style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic' }}>Nenhum tutor ativo.</span>
+            )}
+            {ranking.map((r, i) => {
+              const color = ATIVIDADE_COLORS[r.atividade] || C.textMuted
+              return (
+                <div key={r.nick} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 10, color: C.textMuted, width: 14, textAlign: 'right', flexShrink: 0 }}>{i + 1}</span>
+                  <span style={{ fontSize: 12, color: C.text, width: 160, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nick}</span>
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${((r.count || 0) / maxCount) * 100}%`, background: color, borderRadius: 3, transition: 'width .3s', boxShadow: `0 0 6px ${color}60` }} />
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color, width: 44, textAlign: 'right', flexShrink: 0 }}>
+                    {r.count === undefined ? '—' : `${r.count}r`}
+                  </span>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -3348,7 +3281,7 @@ function PresencaHistoricoChart({ tutores, presencaApenasEmTeste }) {
 }
 
 // ── DashboardTab ──────────────────────────────────────────────────────────────
-function DashboardTab({ tutores, servers, envConfigs, cfg, meInfo }) {
+function DashboardTab({ tutores, servers, envConfigs, cfg, replies, meInfo }) {
   const [sortAsc, setSortAsc] = useState(false)
   const [pagamentoOpen, setPagamentoOpen] = useState(false)
 
@@ -3356,15 +3289,18 @@ function DashboardTab({ tutores, servers, envConfigs, cfg, meInfo }) {
   const inativos  = useMemo(() => tutores.filter(t => t.cargo === 'Inativo' || t.cargo === 'Desligado'), [tutores])
   const emAusencia = useMemo(() => ativos.filter(t => (t.ausencias || []).some(ausenciaAtiva)), [ativos])
 
-  const presencaHoje = useMemo(() => {
-    const hoje = todayStr()
-    const base = _cfg.presencaApenasEmTeste ? ativos.filter(t => t.cargo === 'Em Teste') : ativos
+  const mesRef = mesRefKey()
+
+  const repliesMes = useMemo(() => {
+    const base = ativos.filter(t => esperaReplies(t, mesRef))
+    const preenchidos = base.filter(t => getReplies(t, mesRef) !== undefined)
     return {
-      presentes:   base.filter(t => (t.presencas || []).includes(hoje)),
-      semPresenca: base.filter(t => !(t.presencas || []).includes(hoje)),
-      total: base.length,
+      preenchidos: [...preenchidos].sort((a, b) => getReplies(b, mesRef) - getReplies(a, mesRef)),
+      pendentes:   base.filter(t => getReplies(t, mesRef) === undefined),
+      total:       base.length,
+      soma:        preenchidos.reduce((s, t) => s + getReplies(t, mesRef), 0),
     }
-  }, [ativos, cfg])
+  }, [ativos, replies, mesRef])
 
   const mediaMeses = useMemo(() => {
     if (!ativos.length) return null
@@ -3445,26 +3381,26 @@ function DashboardTab({ tutores, servers, envConfigs, cfg, meInfo }) {
         <SummaryCard label="Mediana Tempo de Casa" value={mediaMeses ? `${mediaMeses.mediana}m` : '—'} color="#3b82f6" icon={Clock} sub={mediaMeses ? `média: ${mediaMeses.media}m` : 'entre ativos'} />
       </div>
 
-      {/* Presenças hoje — só com atividade automática */}
-      {_cfg.atividadeAutomatica && <div style={{ ...cardStyle, marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+      {/* Replies do mês de referência */}
+      <div style={{ ...cardStyle, marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
           <div style={{ width: 28, height: 28, borderRadius: 7, background: `${C.teal}18`, border: `1px solid ${C.teal}30`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CalendarCheck size={13} color={C.teal} />
+            <Reply size={13} color={C.teal} />
           </div>
-          <h3 style={{ fontFamily: 'Cinzel, serif', color: C.text, fontSize: 13, fontWeight: 600, flex: 1 }}>
-            Presenças Hoje — {new Date().toLocaleDateString('pt-BR')}
+          <h3 style={{ fontFamily: 'Cinzel, serif', color: C.text, fontSize: 13, fontWeight: 600, flex: 1, textTransform: 'capitalize' }}>
+            Replies — {mesLabelLongo(mesRef)}
           </h3>
           <span style={{ fontSize: 12, color: C.textSoft }}>
-            <span style={{ ...gText(C.teal), fontWeight: 700, fontSize: 15 }}>{presencaHoje.presentes.length}</span>
-            <span style={{ color: C.textMuted }}> / {presencaHoje.total} {_cfg.presencaApenasEmTeste ? 'em teste' : 'ativos'}</span>
+            <span style={{ ...gText(C.teal), fontWeight: 700, fontSize: 15 }}>{repliesMes.soma}</span>
+            <span style={{ color: C.textMuted }}> replies · {repliesMes.preenchidos.length}/{repliesMes.total} informados</span>
           </span>
         </div>
 
-        {/* Barra de progresso */}
+        {/* Barra de progresso do preenchimento */}
         <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', marginBottom: 16, overflow: 'hidden' }}>
           <div style={{
             height: '100%',
-            width: `${presencaHoje.total ? (presencaHoje.presentes.length / presencaHoje.total) * 100 : 0}%`,
+            width: `${repliesMes.total ? (repliesMes.preenchidos.length / repliesMes.total) * 100 : 0}%`,
             background: `linear-gradient(90deg, #0d9488, ${C.teal})`,
             borderRadius: 4, transition: 'width .4s',
             boxShadow: `0 0 8px ${C.teal}60`,
@@ -3472,47 +3408,49 @@ function DashboardTab({ tutores, servers, envConfigs, cfg, meInfo }) {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          {/* Presentes */}
+          {/* Informados */}
           <div>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#22c55e', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
-              <Check size={11} /> Presente hoje ({presencaHoje.presentes.length})
+              <Check size={11} /> Informados ({repliesMes.preenchidos.length})
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {presencaHoje.presentes.length === 0
-                ? <span style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic' }}>Nenhum registro ainda</span>
-                : presencaHoje.presentes.map(t => (
+              {repliesMes.preenchidos.length === 0
+                ? <span style={{ fontSize: 12, color: C.textMuted, fontStyle: 'italic' }}>Nenhum número informado ainda</span>
+                : repliesMes.preenchidos.map(t => (
                   <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', flexShrink: 0, boxShadow: '0 0 6px #22c55e80' }} />
                     <span style={{ color: C.text, fontWeight: 500 }}>{t.nick}</span>
+                    <span style={{ color: C.textSoft, fontVariantNumeric: 'tabular-nums' }}>{getReplies(t, mesRef)}r</span>
                     <Badge label={getAtividade(t)} colorMap={ATIVIDADE_COLORS} />
                   </div>
                 ))
               }
             </div>
           </div>
-          {/* Sem presença */}
+          {/* Pendentes */}
           <div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
-              <CalendarPlus size={11} /> Sem registro ({presencaHoje.semPresenca.length})
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#fbbf24', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <AlertTriangle size={11} /> Pendentes ({repliesMes.pendentes.length})
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {presencaHoje.semPresenca.length === 0
-                ? <span style={{ fontSize: 12, color: '#22c55e', fontStyle: 'italic' }}>Todos registraram!</span>
-                : presencaHoje.semPresenca.map(t => (
+              {repliesMes.pendentes.length === 0
+                ? <span style={{ fontSize: 12, color: '#22c55e', fontStyle: 'italic' }}>Mês completo!</span>
+                : repliesMes.pendentes.map(t => (
                   <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.textMuted, flexShrink: 0 }} />
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#f59e0b', flexShrink: 0 }} />
                     <span style={{ color: C.textSoft }}>{t.nick}</span>
-                    <Badge label={getAtividade(t)} colorMap={ATIVIDADE_COLORS} />
+                    <span style={{ fontSize: 10, color: C.textMuted }}>{t.cargo}</span>
                   </div>
                 ))
               }
             </div>
           </div>
         </div>
-      </div>}
+      </div>
 
-      {/* Histórico de presenças — só com atividade automática */}
-      {_cfg.atividadeAutomatica && <PresencaHistoricoChart tutores={tutores} presencaApenasEmTeste={_cfg.presencaApenasEmTeste} />}
+      {/* Histórico de replies */}
+      <RepliesHistoricoChart tutores={tutores} />
+
 
       {/* Charts */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 28 }}>
@@ -3532,7 +3470,7 @@ function DashboardTab({ tutores, servers, envConfigs, cfg, meInfo }) {
             ),
           },
           {
-            title: 'Distribuição por Atividade', Icon: Activity, hidden: !_cfg.atividadeAutomatica,
+            title: 'Distribuição por Atividade', Icon: Activity,
             content: (
               <ResponsiveContainer width="100%" height={230}>
                 <BarChart data={atividadeData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
@@ -4037,6 +3975,8 @@ const AUDIT_LABELS = {
   tutor_edit:             { label: 'Tutor editado',          color: C.gold },
   tutor_delete:           { label: 'Tutor removido',         color: '#ef4444' },
   cargo_change:           { label: 'Cargo alterado',         color: '#8b5cf6' },
+  replies_save:           { label: 'Replies informadas',     color: C.teal },
+  // legado — presenças foram removidas, mantido para logs antigos
   presenca_add:           { label: 'Presença adicionada',    color: '#10b981' },
   presenca_add_todos:     { label: 'Presença em massa',      color: '#10b981' },
   presenca_remove:        { label: 'Presença removida',      color: '#f97316' },
@@ -4093,7 +4033,7 @@ function AuditoriaPanel() {
   ]
   const AUTH_ACTIONS    = new Set(['login','logout','password_set'])
   const DEVICE_ACTIONS  = new Set(['device_approve','device_deny','device_delete','device_permissions','ip_revoke'])
-  const TUTOR_ACTIONS   = new Set(['tutores_save','tutor_add','tutor_edit','tutor_delete','cargo_change','presenca_add','presenca_add_todos','presenca_remove','ausencia_add','ausencia_remove','obs_add'])
+  const TUTOR_ACTIONS   = new Set(['tutores_save','tutor_add','tutor_edit','tutor_delete','cargo_change','replies_save','presenca_add','presenca_add_todos','presenca_remove','ausencia_add','ausencia_remove','obs_add'])
   const ADMIN_ACTIONS   = new Set(['admin_apelidos_update','apikey_update','env_list_update'])
   const SETTINGS_ACTIONS = new Set(['settings_save'])
 
@@ -4206,14 +4146,13 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
   useEffect(() => { if (open) { setForm({ ..._cfg }); setTab(initialTab) } }, [open, initialTab])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: Number(v) }))
-  const setBool = (k, v) => setForm(f => ({ ...f, [k]: v }))
-  const valid = form.baixaMax >= 1 && form.moderadaMax > form.baixaMax && form.diasParaAlerta >= 1
+  const valid = form.baixaMax >= 0 && form.moderadaMax > form.baixaMax
 
   const preview = [
-    { label: 'Não Definida', range: '0 dias',                                          color: ATIVIDADE_COLORS['Não Definida'] },
-    { label: 'Baixa',        range: `1 – ${form.baixaMax} dias`,                       color: ATIVIDADE_COLORS.Baixa },
-    { label: 'Moderada',     range: `${form.baixaMax + 1} – ${form.moderadaMax} dias`, color: ATIVIDADE_COLORS.Moderada },
-    { label: 'Alta',         range: `${form.moderadaMax + 1}+ dias`,                   color: ATIVIDADE_COLORS.Alta },
+    { label: 'Não Definida', range: 'mês não informado',                                    color: ATIVIDADE_COLORS['Não Definida'] },
+    { label: 'Baixa',        range: `0 – ${form.baixaMax} replies`,                         color: ATIVIDADE_COLORS.Baixa },
+    { label: 'Moderada',     range: `${form.baixaMax + 1} – ${form.moderadaMax} replies`,   color: ATIVIDADE_COLORS.Moderada },
+    { label: 'Alta',         range: `${form.moderadaMax + 1}+ replies`,                     color: ATIVIDADE_COLORS.Alta },
   ]
 
   const numInput = (label, key, min, helpText) => (
@@ -4271,83 +4210,32 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
        (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
-        {/* Toggle atividade automática */}
+        {/* Como a atividade é definida */}
         <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Activity size={13} color={form.atividadeAutomatica ? C.teal : C.textMuted} />
-                Atividade Automática
-              </div>
-              <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
-                {form.atividadeAutomatica
-                  ? 'Calculada automaticamente pelas presenças mensais'
-                  : 'Definida manualmente em cada tutor'}
-              </div>
-            </div>
-            <button
-              onClick={() => setBool('atividadeAutomatica', !form.atividadeAutomatica)}
-              style={{
-                width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
-                background: form.atividadeAutomatica ? C.teal : 'rgba(255,255,255,0.12)',
-                position: 'relative', flexShrink: 0, transition: 'background .2s',
-                boxShadow: form.atividadeAutomatica ? `0 0 10px ${C.teal}60` : 'none',
-              }}
-            >
-              <span style={{
-                position: 'absolute', top: 3, left: form.atividadeAutomatica ? 23 : 3,
-                width: 18, height: 18, borderRadius: '50%', background: '#fff',
-                transition: 'left .2s', boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-              }} />
-            </button>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Reply size={13} color={C.teal} />
+            Atividade por replies mensais
+          </div>
+          <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.6 }}>
+            A atividade de cada tutor vem do número de replies do <strong style={{ color: C.textSoft }}>mês anterior</strong>,
+            informado manualmente pelo formulário mensal (aba Cadastro → "Replies do Mês").
+            Mês de referência atual: <strong style={{ color: C.textSoft, textTransform: 'capitalize' }}>{mesLabelLongo(mesRefKey())}</strong>.
           </div>
         </div>
 
-        {/* Toggle presença apenas Em Teste — só visível quando atividade automática */}
-        {form.atividadeAutomatica && <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '14px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Users size={13} color={form.presencaApenasEmTeste ? '#3b82f6' : C.textMuted} />
-                Presença apenas para Em Teste
-              </div>
-              <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
-                {form.presencaApenasEmTeste
-                  ? 'Somente tutores Em Teste têm presença contabilizada'
-                  : 'Todos os tutores têm presença contabilizada'}
-              </div>
-            </div>
-            <button
-              onClick={() => setBool('presencaApenasEmTeste', !form.presencaApenasEmTeste)}
-              style={{
-                width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
-                background: form.presencaApenasEmTeste ? '#3b82f6' : 'rgba(255,255,255,0.12)',
-                position: 'relative', flexShrink: 0, transition: 'background .2s',
-                boxShadow: form.presencaApenasEmTeste ? '0 0 10px #3b82f660' : 'none',
-              }}
-            >
-              <span style={{
-                position: 'absolute', top: 3, left: form.presencaApenasEmTeste ? 23 : 3,
-                width: 18, height: 18, borderRadius: '50%', background: '#fff',
-                transition: 'left .2s', boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-              }} />
-            </button>
-          </div>
-        </div>}
-
-        {/* Regras de atividade (só visível quando automático) */}
-        {form.atividadeAutomatica && <div>
+        {/* Faixas de atividade */}
+        <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Activity size={12} /> Regras de Atividade (por mês)
+            <Activity size={12} /> Faixas de Atividade (replies / mês)
           </div>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
-            {numInput('Máx. dias → Baixa', 'baixaMax', 1, 'Presença abaixo desse limite = Baixa')}
-            {numInput('Máx. dias → Moderada', 'moderadaMax', form.baixaMax + 1, 'Acima disso = Alta')}
+            {numInput('Máx. replies → Baixa', 'baixaMax', 0, 'Até esse número = Baixa')}
+            {numInput('Máx. replies → Moderada', 'moderadaMax', form.baixaMax + 1, 'Acima disso = Alta')}
           </div>
 
-          {/* Preview das regras */}
+          {/* Preview das faixas */}
           <div style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 14px' }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 10 }}>Preview das regras</div>
+            <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 10 }}>Preview das faixas</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {preview.map(r => (
                 <div key={r.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -4363,15 +4251,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
               </div>
             )}
           </div>
-        </div>}
-
-        {/* Alertas — só visível quando atividade automática */}
-        {form.atividadeAutomatica && <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.gold, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Bell size={12} /> Alertas de Presença
-          </div>
-          {numInput('Dias sem presença para alertar', 'diasParaAlerta', 1, 'Tutor com mais dias inativo que esse valor recebe alerta')}
-        </div>}
+        </div>
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
           <button style={btn('ghost')} onClick={onClose}><X size={14} /> Cancelar</button>
@@ -4381,6 +4261,7 @@ function SettingsModal({ open, onClose, onSave, initialTab = 'config', servers, 
           </button>
         </div>
       </div>
+
       )}
     </Modal>
   )
@@ -4716,11 +4597,12 @@ function AdminPanel({ meInfo, onUpdateEnv }) {
 }
 
 // ── TutorProfileModal ─────────────────────────────────────────────────────────
-function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDeleteAusenciaHistorico, repliesData = {} }) {
+function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDeleteAusenciaHistorico, replies = {}, onSaveReplies }) {
   const [copied, setCopied] = useState(false)
   const [showHistorico, setShowHistorico] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null) // { type: 'obs'|'ausencia', id }
   const [selectedMonth, setSelectedMonth] = useState(null)
+  const [repliesOpen, setRepliesOpen] = useState(false)
 
   const handleCopy = () => {
     const texto = `ADICIONAR CARGOS/ REMOVER CARGOS\n\nDiscord: ${tutor.discord || ''}\nIn-game: ${tutor.nick}`
@@ -4729,61 +4611,24 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
       setTimeout(() => setCopied(false), 2000)
     })
   }
-  const currentMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })()
-  const activeMonth = selectedMonth || currentMonthKey
 
-  const meses = useMemo(() => {
-    const hoje = new Date()
-    return Array.from({ length: 6 }, (_, i) => {
-      const d = new Date(hoje.getFullYear(), hoje.getMonth() - (5 - i), 1)
-      return {
-        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-        label: d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
-      }
-    })
-  }, [])
+  const mesRef      = mesRefKey()
+  const activeMonth = selectedMonth || mesRef
+  const meses       = useMemo(() => ultimosMeses(6, mesRef), [mesRef])
 
-  const usaPresenca = !(_cfg.presencaApenasEmTeste && tutor?.cargo !== 'Em Teste')
-  const startMonth  = tutor?.dataInicio?.slice(0, 7) || null
-  const nickLowForReplies = tutor?.nick?.toLowerCase()
-  const repliesCount = repliesData?.[nickLowForReplies]?.[activeMonth] || 0
-
-  const ATIV_NUM = { 'Alta': 4, 'Moderada': 3, 'Baixa': 2, 'Não Definida': 1 }
+  const startMonth   = tutor?.dataInicio?.slice(0, 7) || null
+  const repliesCount = tutor ? getReplies(tutor, activeMonth) : undefined
 
   const chartData = useMemo(() => {
     const mesesVisiveis = startMonth ? meses.filter(m => m.key >= startMonth) : meses
-    if (usaPresenca) {
-      return mesesVisiveis.map(m => ({
-        key: m.key,
-        name: m.label,
-        presencas: (tutor?.presencas || []).filter(d => d.startsWith(m.key)).length,
-        replies: repliesData?.[nickLowForReplies]?.[m.key] || 0,
-      }))
-    }
     return mesesVisiveis.map(m => {
-      const historico = tutor?.atividadeHistorico || []
-      const entrada = historico.find(h => h.mes === m.key)
-      const atv = m.key === currentMonthKey
-        ? (tutor?.atividade || 'Não Definida')
-        : (entrada?.atividade || null)
-      return { key: m.key, name: m.label, valor: atv ? (ATIV_NUM[atv] || 0) : 0, atividade: atv || 'Sem dados' }
+      const n = tutor ? getReplies(tutor, m.key) : undefined
+      return { key: m.key, name: m.label, replies: n ?? 0, preenchido: n !== undefined }
     })
-  }, [meses, tutor, usaPresenca, startMonth, repliesData, nickLowForReplies])
+  }, [meses, tutor, startMonth, replies])
 
-  const currentMonthInfo = useMemo(() => {
-    if (!tutor) return null
-    const [yr, mo] = activeMonth.split('-').map(Number)
-    const totalDays = new Date(yr, mo, 0).getDate()
-    const marked    = new Set((tutor.presencas || []).filter(d => d.startsWith(activeMonth)))
-    const days = Array.from({ length: totalDays }, (_, i) => {
-      const day  = String(i + 1).padStart(2, '0')
-      const date = `${activeMonth}-${day}`
-      return { date, day: i + 1, marked: marked.has(date), future: date > todayStr() }
-    })
-    return { days, count: marked.size, totalDays }
-  }, [tutor, activeMonth])
+  useEffect(() => { if (!open) { setShowHistorico(false); setConfirmDelete(null); setSelectedMonth(null); setRepliesOpen(false) } }, [open])
 
-  useEffect(() => { if (!open) { setShowHistorico(false); setConfirmDelete(null); setSelectedMonth(null) } }, [open])
 
   if (!tutor) return null
 
@@ -4791,12 +4636,10 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
   const atividadeColor = ATIVIDADE_COLORS[atividade] || C.textMuted
   const ausenciasAtivas = (tutor.ausencias || []).filter(ausenciaAtiva)
   const emAusencia     = ausenciasAtivas.length > 0
-  const diasAlerta     = diasSemPresenca(tutor)
-  const accentColor    = diasAlerta !== null ? '#ef4444' : emAusencia ? '#8b5cf6' : atividadeColor
-  const count          = currentMonthInfo?.count || 0
-  const pct            = currentMonthInfo ? Math.round((count / currentMonthInfo.totalDays) * 100) : 0
-  const [amY, amM]     = activeMonth.split('-').map(Number)
-  const activeMonthLabel = new Date(amY, amM - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+  const pendente       = repliesPendente(tutor, mesRef)
+  const accentColor    = pendente ? '#f59e0b' : emAusencia ? '#8b5cf6' : atividadeColor
+  const activeMonthLabel = mesLabelLongo(activeMonth)
+  const maxReplies     = Math.max(...chartData.map(d => d.replies), 1)
 
   const infoRow = (Icon, label, value, color) => value ? (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4843,9 +4686,9 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
                   <Palmtree size={10} /> Ausente até {formatDate(ausenciasAtivas[0].dataFim)}
                 </span>
               )}
-              {diasAlerta !== null && (
-                <span style={{ background: 'rgba(239,68,68,0.14)', border: '1px solid rgba(239,68,68,0.5)', borderRadius: 6, color: '#f87171', fontSize: 11, fontWeight: 700, padding: '3px 9px', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                  <AlertTriangle size={10} /> {diasAlerta}d sem presença
+              {pendente && (
+                <span style={{ background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.5)', borderRadius: 6, color: '#fbbf24', fontSize: 11, fontWeight: 700, padding: '3px 9px', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <AlertTriangle size={10} /> Replies de {mesLabel(mesRef)} pendentes
                 </span>
               )}
             </div>
@@ -4867,65 +4710,58 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
           {tutor.detalheHorario && infoRow(Clock, 'Detalhe', tutor.detalheHorario)}
         </div>
 
-        {/* Mês atual — só para quem usa presença */}
-        {usaPresenca && currentMonthInfo && (
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <CalendarCheck size={12} />
-              Presenças — {activeMonthLabel}
-              <span style={{ marginLeft: 'auto', color: C.textSoft, fontWeight: 400, display: 'flex', alignItems: 'center', gap: 8 }}>
-                {count} / {currentMonthInfo.totalDays} dias · {pct}%
-                {repliesCount > 0 && (
-                  <span style={{ background: 'rgba(99,102,241,0.12)', border: `1px solid ${C.primaryBright}30`, borderRadius: 5, padding: '1px 7px', fontSize: 10, color: C.primaryBright, fontWeight: 600 }}>
-                    {repliesCount} replies
-                  </span>
-                )}
+        {/* Replies do mês selecionado */}
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Reply size={12} />
+            <span style={{ textTransform: 'capitalize' }}>Replies — {activeMonthLabel}</span>
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, position: 'relative' }}>
+              <span style={{ fontSize: 15, fontWeight: 800, ...gText(repliesCount === undefined ? C.textMuted : atividadeColor), fontVariantNumeric: 'tabular-nums' }}>
+                {repliesCount === undefined ? '—' : repliesCount}
               </span>
-            </div>
-            {/* Barra de progresso */}
-            <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', marginBottom: 10, overflow: 'hidden' }}>
-              <div style={{
-                height: '100%', width: `${pct}%`, borderRadius: 4, transition: 'width .4s',
-                background: `linear-gradient(90deg, ${atividadeColor}80, ${atividadeColor})`,
-                boxShadow: `0 0 8px ${atividadeColor}60`,
-              }} />
-            </div>
-            {/* Próximo nível — só no mês atual */}
-            {activeMonth === currentMonthKey && (
-              <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                {(() => {
-                  if (count < _cfg.baixaMax + 1)    return <><span style={{ color: ATIVIDADE_COLORS.Baixa }}>●</span> {_cfg.baixaMax + 1 - count}d para Moderada</>
-                  if (count < _cfg.moderadaMax + 1)  return <><span style={{ color: ATIVIDADE_COLORS.Moderada }}>●</span> {_cfg.moderadaMax + 1 - count}d para Alta</>
-                  return <><span style={{ color: ATIVIDADE_COLORS.Alta }}>●</span> Atividade Alta atingida!</>
-                })()}
-              </div>
-            )}
-            {/* Calendário */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {currentMonthInfo.days.map(d => (
-                <div key={d.date} title={d.date} style={{
-                  width: 27, height: 27, borderRadius: 6,
-                  background: d.future ? 'rgba(255,255,255,0.02)'
-                    : d.marked ? `${C.primaryBright}28` : 'rgba(255,255,255,0.04)',
-                  border: d.future ? `1px solid rgba(255,255,255,0.04)`
-                    : d.marked ? `1px solid ${C.primaryBright}55` : `1px solid rgba(255,255,255,0.07)`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, fontWeight: d.marked ? 700 : 400,
-                  color: d.future ? 'rgba(255,255,255,0.12)'
-                    : d.marked ? C.primaryBright : C.textMuted,
-                  boxShadow: d.marked ? `0 0 8px ${C.primaryBright}30` : 'none',
-                }}>
-                  {d.day}
-                </div>
-              ))}
-            </div>
+              {onSaveReplies && (
+                <>
+                  <button style={{ ...btn('ghost', 'sm'), color: C.primaryBright, borderColor: `${C.primaryBright}45` }}
+                    onClick={() => setRepliesOpen(v => !v)}>
+                    <Pencil size={11} /> {repliesCount === undefined ? 'Informar' : 'Editar'}
+                  </button>
+                  {repliesOpen && (
+                    <RepliesPopover tutor={tutor} mes={activeMonth} onSaveReplies={onSaveReplies}
+                      onClose={() => setRepliesOpen(false)} side="bottom" />
+                  )}
+                </>
+              )}
+            </span>
           </div>
-        )}
+          {/* Barra proporcional ao maior mês do histórico */}
+          <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', marginBottom: 10, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', width: `${Math.round(((repliesCount || 0) / maxReplies) * 100)}%`, borderRadius: 4, transition: 'width .4s',
+              background: `linear-gradient(90deg, ${atividadeColor}80, ${atividadeColor})`,
+              boxShadow: `0 0 8px ${atividadeColor}60`,
+            }} />
+          </div>
+          {repliesCount === undefined ? (
+            <div style={{ fontSize: 11, color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <AlertTriangle size={11} /> Número do formulário mensal ainda não informado
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: C.textMuted, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {(() => {
+                if (repliesCount <= _cfg.baixaMax)
+                  return <><span style={{ color: ATIVIDADE_COLORS.Moderada }}>●</span> {_cfg.baixaMax + 1 - repliesCount} replies para Moderada</>
+                if (repliesCount <= _cfg.moderadaMax)
+                  return <><span style={{ color: ATIVIDADE_COLORS.Alta }}>●</span> {_cfg.moderadaMax + 1 - repliesCount} replies para Alta</>
+                return <><span style={{ color: ATIVIDADE_COLORS.Alta }}>●</span> Atividade Alta atingida!</>
+              })()}
+            </div>
+          )}
+        </div>
 
         {/* Histórico 6 meses */}
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.primaryBright, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10 }}>
-            {usaPresenca ? 'Histórico — últimos 6 meses' : 'Atividade — últimos 6 meses'}
+            Replies — últimos 6 meses
           </div>
           <ResponsiveContainer width="100%" height={150}>
             <BarChart
@@ -4936,35 +4772,24 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
             >
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="name" tick={{ fill: C.textSoft, fontSize: 10 }} />
-              {usaPresenca
-                ? <YAxis tick={{ fill: C.textSoft, fontSize: 10 }} allowDecimals={false} />
-                : <YAxis tick={{ fill: C.textSoft, fontSize: 10 }} domain={[0, 4]} ticks={[1,2,3,4]} tickFormatter={v => (['','Nd','Bx','Md','Al'][v] || '')} />
-              }
-              <Tooltip content={usaPresenca ? <RechartTooltip /> : <AtividadeTooltip />} />
-              {usaPresenca ? (
-                <Bar dataKey="presencas" name="Dias presente" radius={[4, 4, 0, 0]}>
-                  {chartData.map((d, i) => {
-                    const c = d.presencas
-                    const color = c === 0              ? ATIVIDADE_COLORS['Não Definida']
-                                : c <= _cfg.baixaMax    ? ATIVIDADE_COLORS.Baixa
-                                : c <= _cfg.moderadaMax ? ATIVIDADE_COLORS.Moderada
-                                : ATIVIDADE_COLORS.Alta
-                    const isActive = d.key === activeMonth
-                    return <Cell key={i} fill={isActive ? color : `${color}70`} strokeWidth={isActive ? 2 : 0} stroke={isActive ? color : 'none'} />
-                  })}
-                </Bar>
-              ) : (
-                <Bar dataKey="valor" name="Atividade" radius={[4, 4, 0, 0]}>
-                  {chartData.map((d, i) => {
-                    const color = ATIVIDADE_COLORS[d.atividade] || C.textMuted
-                    const isActive = d.key === activeMonth
-                    return <Cell key={i} fill={isActive ? color : `${color}70`} strokeWidth={isActive ? 2 : 0} stroke={isActive ? color : 'none'} />
-                  })}
-                </Bar>
-              )}
+              <YAxis tick={{ fill: C.textSoft, fontSize: 10 }} allowDecimals={false} />
+              <Tooltip content={<RechartTooltip />} />
+              <Bar dataKey="replies" name="Replies" radius={[4, 4, 0, 0]}>
+                {chartData.map((d, i) => {
+                  const color = d.preenchido
+                    ? ATIVIDADE_COLORS[atividadeFromReplies(d.replies)]
+                    : ATIVIDADE_COLORS['Não Definida']
+                  const isActive = d.key === activeMonth
+                  return <Cell key={i} fill={isActive ? color : `${color}70`} strokeWidth={isActive ? 2 : 0} stroke={isActive ? color : 'none'} />
+                })}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
+          <div style={{ fontSize: 10, color: C.textMuted, marginTop: 6, textAlign: 'center' }}>
+            Clique em um mês para ver o detalhe
+          </div>
         </div>
+
 
         {/* Obs */}
         {tutor.obs && (() => {
@@ -5082,15 +4907,14 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
-  const alertas = _cfg.atividadeAutomatica ? (tutores || []).filter(t =>
+  // Alertas = tutores ativos sem o número de replies do mês de referência.
+  const mesRef  = mesRefKey()
+  const alertas = (tutores || []).filter(t =>
     (t.cargo === 'Sênior' || t.cargo === 'Tutor' || t.cargo === 'Em Teste') &&
-    diasSemPresenca(t) !== null
-  ) : []
-  const unseenCount = alertas.filter(t => {
-    const dias = diasSemPresenca(t)
-    const seenAt = seenMap[t.nick]
-    return seenAt === undefined || dias > seenAt + 3
-  }).length
+    repliesPendente(t, mesRef)
+  )
+  // "Lido" é por mês de referência: um novo mês re-alerta automaticamente.
+  const unseenCount = alertas.filter(t => seenMap[t.nick] !== mesRef).length
 
   return (
     <header style={{
@@ -5139,15 +4963,14 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
           })()}
         </div>
 
-        {/* Sino de notificações — só para admins ou quando atividade automática */}
-        {(meInfo?.isAdmin || _cfg.atividadeAutomatica) && (
+        {/* Sino de notificações */}
         <div style={{ position: 'relative' }}>
           <button
             onClick={() => {
               if (bellOpen) { setBellOpen(false); return }
               if (unseenCount > 0) {
                 const newMap = { ...seenMap }
-                alertas.forEach(t => { newMap[t.nick] = diasSemPresenca(t) })
+                alertas.forEach(t => { newMap[t.nick] = mesRef })
                 setSeenMap(newMap)
                 saveSeenMap(newMap)
               }
@@ -5204,7 +5027,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
                 }}>
                   <Bell size={13} color={alertas.length > 0 ? '#fb923c' : C.textMuted} />
                   <span style={{ fontSize: 12, fontWeight: 700, color: C.text, flex: 1 }}>
-                    Alertas de Presença
+                    Replies pendentes
                   </span>
                   {alertas.length > 0 && (
                     <span style={{
@@ -5258,16 +5081,16 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
                     <CalendarCheck size={28} color={C.teal} style={{ margin: '0 auto 10px', display: 'block', opacity: .6 }} />
                     <div style={{ fontSize: 13, color: '#34d399', fontWeight: 600 }}>Tudo certo!</div>
                     <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
-                      Nenhum tutor sem presença há mais de {_cfg.diasParaAlerta} dias.
+                      Todos os tutores já têm replies de {mesLabel(mesRef)}.
                     </div>
                   </div>
                 ) : (
                   <div style={{ maxHeight: 360, overflowY: 'auto' }}>
                     {alertas
-                      .sort((a, b) => (diasSemPresenca(b) ?? 0) - (diasSemPresenca(a) ?? 0))
+                      .slice()
+                      .sort((a, b) => a.nick.localeCompare(b.nick))
                       .map(t => {
-                        const dias = diasSemPresenca(t)
-                        const urgente = dias >= _cfg.diasParaAlerta + 2
+                        const urgente = t.cargo === 'Em Teste'
                         return (
                           <div key={t.id} style={{
                             padding: '10px 16px',
@@ -5300,7 +5123,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
                               color: urgente ? '#f87171' : '#fb923c',
                               padding: '3px 8px', whiteSpace: 'nowrap', flexShrink: 0,
                             }}>
-                              {dias}d
+                              {mesLabel(mesRef)}
                             </span>
                           </div>
                         )
@@ -5312,7 +5135,7 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
                 <div style={{ padding: '8px 16px', borderTop: `1px solid ${C.border}`, display: 'flex', alignItems: 'center' }}>
                   <span style={{ fontSize: 10, color: C.textMuted, display: 'flex', alignItems: 'center', gap: 5 }}>
                     <AlertTriangle size={10} color="#f97316" />
-                    Alerta após {_cfg.diasParaAlerta}d sem presença
+                    Replies do mês de referência ({mesLabel(mesRef)}) não informadas
                   </span>
                 </div>
               </div>
@@ -5326,7 +5149,6 @@ function Header({ tab, setTab, tutores, servers: serversProp, meInfo, onOpenSett
             </>
           )}
         </div>
-        )}
 
         <nav style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           {[['cadastro', ClipboardList, 'Cadastro'], ['dashboard', BarChart2, 'Dashboard']].map(([key, Icon, label]) => {
@@ -5388,7 +5210,7 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
   const [input, setInput]     = useState('')
   const [loading, setLoading] = useState(false)
   const [msgs, setMsgs]       = useState([
-    { role: 'ai', text: 'Oi! Pode me pedir pra adicionar presenças, consultar dados ou qualquer coisa sobre a equipe. Ex: "adiciona presença hoje pro Campin"' }
+    { role: 'ai', text: 'Oi! Pode me pedir pra registrar ausências, mudar cargos, adicionar observações ou consultar dados da equipe. Ex: "coloca o Campin de férias de 15/06 a 22/06"' }
   ])
   const bottomRef   = useRef(null)
   const inputRef    = useRef(null)
@@ -5403,21 +5225,8 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     setTutores(prev => {
       let updated = [...prev]
       acoes.forEach(a => {
-        if (a.tipo === 'add_presenca_todos') {
-          const exceto = (a.exceto || []).map(n => n.toLowerCase())
-          updated = updated.map(t => {
-            if (exceto.includes(t.nick.toLowerCase())) return t
-            if (!['Tutor','Em Teste','Sênior'].includes(t.cargo)) return t
-            return { ...t, presencas: [...new Set([...(t.presencas||[]), a.data])] }
-          })
-          return
-        }
         updated = updated.map(t => {
           if (t.nick.toLowerCase() !== a.nick?.toLowerCase()) return t
-          if (a.tipo === 'add_presenca')
-            return { ...t, presencas: [...new Set([...(t.presencas||[]), a.data])] }
-          if (a.tipo === 'remove_presenca')
-            return { ...t, presencas: (t.presencas||[]).filter(d => d !== a.data) }
           if (a.tipo === 'add_ausencia') {
             const nova = { id: Date.now() + Math.random(), dataInicio: a.dataInicio, dataFim: a.dataFim, motivo: a.motivo || '' }
             return { ...t, ausencias: [...(t.ausencias||[]), nova] }
@@ -5441,146 +5250,19 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     return acoes.length
   }
 
-  // ── Estado e handlers para detecção de log de canal ─────────────────────────
-  const [preview, setPreview]         = useState(null)
-  const [logMsgModal, setLogMsgModal] = useState(null)
-  // preview: { matched: [{tutor, jaTemData, naoAplica}], unmatched: string[],
-  //            dataLog: string, selecionados: Set<id>, confirmed: boolean, linhas: number }
-
-  const buildPreview = useCallback((text, data) => {
-    const { nomes, spansMidnight, beforeMidnight, afterMidnight, mensagensPorNick } = parseChatLogFull(text)
-    const today = todayStr()
-    // Se o log cruza meia-noite: data = ontem (primária), data2 = hoje (secundária)
-    const data2 = spansMidnight && data !== today ? today : null
-    const matched = [], unmatched = []
-    for (const nome of nomes) {
-      const tutor = tutores.find(t => t.nick.toLowerCase() === nome.toLowerCase())
-      if (tutor) {
-        const nickLow = tutor.nick.toLowerCase()
-        const datas = !spansMidnight
-          ? [data]
-          : [
-              ...(beforeMidnight.has(nickLow) ? [data]  : []),
-              ...(afterMidnight.has(nickLow)  ? [data2 ?? data] : []),
-            ]
-        const datasNovas = datas.filter(d => !(tutor.presencas || []).includes(d))
-        const jaTemData  = datasNovas.length === 0
-        const naoAplica  = _cfg.presencaApenasEmTeste && tutor.cargo !== 'Em Teste'
-        matched.push({ tutor, jaTemData, naoAplica, datas, datasNovas })
-      } else {
-        unmatched.push(nome)
-      }
-    }
-    const selecionados = new Set(matched.filter(m => !m.jaTemData && !m.naoAplica).map(m => m.tutor.id))
-    return { matched, unmatched, dataLog: data, data2, spansMidnight, beforeMidnight, afterMidnight, mensagensPorNick, selecionados, confirmed: false, linhas: text.trim().split('\n').length }
-  }, [tutores])
-
-  const handleChangeDate = (newDate) => {
-    if (!preview || !newDate) return
-    let data2 = null
-    if (preview.spansMidnight) {
-      const d = new Date(newDate + 'T12:00:00')
-      d.setDate(d.getDate() + 1)
-      data2 = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-    }
-    const updated = {
-      ...preview,
-      dataLog: newDate,
-      data2,
-      matched: preview.matched.map(m => {
-        const nickLow = m.tutor.nick.toLowerCase()
-        const datas = !preview.spansMidnight
-          ? [newDate]
-          : [
-              ...(preview.beforeMidnight.has(nickLow) ? [newDate]       : []),
-              ...(preview.afterMidnight.has(nickLow)  ? [data2 ?? newDate] : []),
-            ]
-        const datasNovas = datas.filter(d => !(m.tutor.presencas || []).includes(d))
-        const jaTemData  = datasNovas.length === 0
-        return { ...m, datas, datasNovas, jaTemData }
-      }),
-    }
-    updated.selecionados = new Set(updated.matched.filter(m => !m.jaTemData && !m.naoAplica).map(m => m.tutor.id))
-    setPreview(updated)
-  }
-
-  const handleToggleTutor = (id) => {
-    if (!preview) return
-    const n = new Set(preview.selecionados)
-    n.has(id) ? n.delete(id) : n.add(id)
-    setPreview({ ...preview, selecionados: n })
-  }
-
-  const handleToggleAll = () => {
-    if (!preview) return
-    const pendentes = preview.matched.filter(m => !m.jaTemData && !m.naoAplica)
-    const allSel = pendentes.length > 0 && pendentes.every(m => preview.selecionados.has(m.tutor.id))
-    setPreview({ ...preview, selecionados: allSel ? new Set() : new Set(pendentes.map(m => m.tutor.id)) })
-  }
-
-  const handleConfirmLog = () => {
-    if (!preview || !preview.selecionados.size) return
-    const ids = [...preview.selecionados]
-    const { dataLog, data2 } = preview
-    if (pendingAuditRef) pendingAuditRef.current = { action: 'presenca_add', nick: `${ids.length} via log`, details: { data: dataLog, count: ids.length } }
-    setTutores(prev => prev.map(t => {
-      if (!ids.includes(t.id)) return t
-      const matchInfo = preview.matched.find(m => m.tutor.id === t.id)
-      const novasDatas = matchInfo?.datasNovas?.length ? matchInfo.datasNovas : [dataLog]
-      return { ...t, presencas: [...new Set([...(t.presencas || []), ...novasDatas])], atividadeCalculada: null, apto: null }
-    }))
-    const count = ids.length
-    const allNovas = [...new Set(ids.flatMap(id => {
-      const mi = preview.matched.find(m => m.tutor.id === id)
-      return mi?.datasNovas?.length ? mi.datasNovas : [dataLog]
-    }))].sort()
-    const fmtDate = d => `${d.slice(8)}/${d.slice(5,7)}`
-    const datesDesc = allNovas.map(fmtDate).join(' e ')
-    // Contabiliza replies por tutor/mês e envia ao backend
-    const repliesPayload = {}
-    for (const id of ids) {
-      const mi = preview.matched.find(m => m.tutor.id === id)
-      if (!mi) continue
-      const nickLow = mi.tutor.nick.toLowerCase()
-      const msgs = preview.mensagensPorNick?.[nickLow] || []
-      for (const msg of msgs) {
-        const month = (msg.depois && preview.data2) ? preview.data2.slice(0, 7) : dataLog.slice(0, 7)
-        if (!repliesPayload[nickLow]) repliesPayload[nickLow] = {}
-        repliesPayload[nickLow][month] = (repliesPayload[nickLow][month] || 0) + 1
-      }
-    }
-    if (Object.keys(repliesPayload).length > 0)
-      apiFetch('/api/replies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ replies: repliesPayload }) })
-    setPreview(p => ({ ...p, confirmed: true }))
-    setLogMsgModal(null)
-    showToast(`${count} presença${count > 1 ? 's' : ''} registrada${count > 1 ? 's' : ''} em ${datesDesc}`, 'success')
-    setMsgs(prev => [...prev, {
-      role: 'ai',
-      text: `${count} presença${count > 1 ? 's' : ''} registrada${count > 1 ? 's' : ''} em ${datesDesc}.`,
-      acoes: count,
-    }])
-  }
-
   const showCapabilities = () => {
     setMsgs(prev => [...prev,
       { role: 'user', text: 'O que você pode fazer?' },
-      { role: 'ai', text: `Posso ajudar com:\n\n• Registrar presença — "adiciona presença hoje pro Campin"\n• Remover presença — "remove presença de ontem do Zek"\n• Presença em lote — "adiciona presença hoje pra todos"\n• Ausência — "coloca Campin de férias de 15/06 a 22/06"\n• Mudar cargo — "efetiva o Zek"\n• Observação — "adiciona obs no Campin: pendência de recrutamento"\n• Log do canal — cole o histórico do chat de suporte e eu detecto quem estava ativo automaticamente` },
-    ])
-  }
+      { role: 'ai', text: `Posso ajudar com:
 
-  // ── Detecta se o log é de hoje ou de ontem baseado nos timestamps ────────────
-  const detectLogDate = (text) => {
-    const now = new Date()
-    const currentMinutes = now.getHours() * 60 + now.getMinutes()
-    const times = [...text.matchAll(/^(\d{2}):(\d{2}):\d{2}/gm)]
-    if (!times.length) return todayStr()
-    const maxMinutes = Math.max(...times.map(m => +m[1] * 60 + +m[2]))
-    if (maxMinutes > currentMinutes) {
-      const d = new Date(now)
-      d.setDate(d.getDate() - 1)
-      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-    }
-    return todayStr()
+• Ausência — "coloca Campin de férias de 15/06 a 22/06"
+• Remover ausência — "remove a ausência do Zek"
+• Mudar cargo — "efetiva o Zek"
+• Observação — "adiciona obs no Campin: pendência de recrutamento"
+• Consulta — "como está o Campin?" ou "lista os ativos"
+
+As replies mensais são preenchidas na aba Cadastro → "Replies do Mês".` },
+    ])
   }
 
   // ── Anexo de arquivo .txt ─────────────────────────────────────────────────────
@@ -5594,22 +5276,10 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
       try {
         const raw  = new TextDecoder('windows-1252').decode(ev.target.result)
         const text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-        const logLineCount = (text.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
-        if (logLineCount >= 3) {
-          const p = buildPreview(text, detectLogDate(text))
-          setPreview(p)
-          const jogadores = p.matched.length + p.unmatched.length
-          setMsgs(prev => [...prev,
-            { role: 'user', text: `📎 ${file.name} (${p.linhas} linhas · ${jogadores} jogador${jogadores !== 1 ? 'es' : ''} único${jogadores !== 1 ? 's' : ''})` },
-            { role: 'log-preview' },
-          ])
-          showToast(`Log importado — ${jogadores} jogadores detectados`, 'info')
-        } else {
-          if (!text.trim()) { showToast('Arquivo vazio ou formato não reconhecido.', 'warning'); return }
-          setInput(text.slice(0, 2000))
-          setTimeout(() => inputRef.current?.focus(), 50)
-          showToast('Conteúdo carregado no campo de texto.', 'info')
-        }
+        if (!text.trim()) { showToast('Arquivo vazio ou formato não reconhecido.', 'warning'); return }
+        setInput(text.slice(0, 2000))
+        setTimeout(() => inputRef.current?.focus(), 50)
+        showToast('Conteúdo carregado no campo de texto.', 'info')
       } catch (err) {
         showToast(`Erro ao processar arquivo: ${err.message}`, 'error')
         console.error('[FILE-IMPORT]', err)
@@ -5623,26 +5293,6 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     const msg = input.trim()
     if (!msg || loading) return
     setInput('')
-
-    // Detecta log de canal: ≥3 linhas no formato "HH:MM:SS Nome [nível]:"
-    const logLineCount = (msg.match(/^\d{2}:\d{2}:\d{2}\s+.+?\s+\[\d+\]:/gm) || []).length
-    if (logLineCount >= 3) {
-      try {
-        const safeMsg = msg.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-        const p = buildPreview(safeMsg, detectLogDate(safeMsg))
-        setPreview(p)
-        const jogadores = p.matched.length + p.unmatched.length
-        setMsgs(prev => [...prev,
-          { role: 'user', text: `📋 Log do canal (${p.linhas} linhas · ${jogadores} jogador${jogadores !== 1 ? 'es' : ''} único${jogadores !== 1 ? 's' : ''})` },
-          { role: 'log-preview' },
-        ])
-        showToast(`Log detectado — ${jogadores} jogadores únicos`, 'info')
-      } catch (err) {
-        showToast(`Erro ao processar log: ${err.message}`, 'error')
-        console.error('[LOG-PREVIEW]', err)
-      }
-      return
-    }
 
     // Fluxo normal → IA
     setMsgs(prev => [...prev, { role: 'user', text: msg }])
@@ -5673,165 +5323,6 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
     }
   }
 
-  // ── Renderização do card de log inline ────────────────────────────────────────
-  const renderLogPreview = () => {
-    if (!preview || preview.confirmed) return null
-    const { matched, unmatched, dataLog, data2, spansMidnight, selecionados, mensagensPorNick } = preview
-    const pendentes = matched.filter(m => !m.jaTemData && !m.naoAplica)
-    const allSel = pendentes.length > 0 && pendentes.every(m => selecionados.has(m.tutor.id))
-
-    return (
-      <div style={{
-        background: 'rgba(99,102,241,0.07)', border: `1px solid ${C.primaryBright}28`,
-        borderRadius: 14, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10,
-      }}>
-        {/* Cabeçalho */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <ClipboardList size={13} color={C.primaryBright} style={{ flexShrink: 0 }} />
-          <span style={{ fontSize: 12, fontWeight: 600, color: C.text, flex: 1 }}>
-            Log detectado — {matched.length} tutor{matched.length !== 1 ? 'es' : ''} encontrado{matched.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-
-        {/* Seletor de data */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <Calendar size={11} color={C.textMuted} />
-          <span style={{ fontSize: 11, color: C.textMuted }}>Data do log:</span>
-          <input
-            type="date"
-            value={dataLog}
-            max={todayStr()}
-            onChange={e => handleChangeDate(e.target.value)}
-            style={{
-              background: 'rgba(255,255,255,0.06)', border: `1px solid ${C.border}`,
-              borderRadius: 6, color: C.text, padding: '3px 7px', fontSize: 11,
-              outline: 'none', cursor: 'pointer',
-            }}
-          />
-          {spansMidnight && data2 && (
-            <span style={{ fontSize: 11, color: C.textSoft }}>
-              — {data2.slice(8)}/{data2.slice(5,7)}/{data2.slice(0,4)}
-            </span>
-          )}
-        </div>
-
-        {/* Lista de tutores */}
-        {matched.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: C.textMuted, letterSpacing: .6, textTransform: 'uppercase' }}>Tutores</span>
-              {pendentes.length > 0 && (
-                <button onClick={handleToggleAll} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.primaryBright, fontSize: 10, padding: 0, fontWeight: 600 }}>
-                  {allSel ? 'Desmarcar todos' : 'Marcar todos'}
-                </button>
-              )}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 200, overflowY: 'auto' }}>
-              {matched.map(({ tutor, jaTemData, naoAplica, datasNovas = [] }) => {
-                const sel = selecionados.has(tutor.id)
-                const bloqueado = jaTemData || naoAplica
-                return (
-                  <div
-                    key={tutor.id}
-                    onClick={() => !bloqueado && handleToggleTutor(tutor.id)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '5px 8px', borderRadius: 7,
-                      cursor: bloqueado ? 'default' : 'pointer',
-                      opacity: bloqueado ? 0.55 : 1,
-                      background: jaTemData ? 'rgba(34,197,94,0.07)' : sel ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.02)',
-                      border: `1px solid ${jaTemData ? '#22c55e22' : sel ? C.primaryBright + '44' : C.border + '55'}`,
-                      transition: 'background .12s, border-color .12s',
-                    }}
-                  >
-                    <div style={{
-                      width: 14, height: 14, borderRadius: 3, flexShrink: 0,
-                      background: jaTemData ? '#22c55e' : sel ? C.primaryBright : 'transparent',
-                      border: `2px solid ${jaTemData ? '#22c55e' : sel ? C.primaryBright : C.border}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .12s',
-                    }}>
-                      {(jaTemData || sel) && <Check size={8} color="#fff" />}
-                    </div>
-                    <span style={{ fontSize: 12, color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tutor.nick}</span>
-                    <span style={{ fontSize: 10, color: C.textMuted, flexShrink: 0 }}>{tutor.cargo}</span>
-                    {spansMidnight && !jaTemData && !naoAplica && datasNovas.map(d => (
-                      <span key={d} style={{ fontSize: 9, color: C.primaryBright, background: 'rgba(99,102,241,0.12)', border: `1px solid ${C.primaryBright}30`, borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>
-                        {d.slice(8)}/{d.slice(5,7)}
-                      </span>
-                    ))}
-                    {jaTemData  && <span style={{ fontSize: 9, color: '#22c55e', fontWeight: 700, flexShrink: 0 }}>✓ ok</span>}
-                    {naoAplica && !jaTemData && <span style={{ fontSize: 9, color: C.textMuted, flexShrink: 0 }}>n/a</span>}
-                    {(mensagensPorNick?.[tutor.nick.toLowerCase()] || []).length > 0 && (
-                      <button
-                        onClick={e => { e.stopPropagation(); setLogMsgModal({ nick: tutor.nick, msgs: mensagensPorNick[tutor.nick.toLowerCase()] || [], spansMidnight, dataLog, data2 }) }}
-                        title="Ver mensagens deste tutor no log"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: '1px 3px', display: 'flex', alignItems: 'center', flexShrink: 0, marginLeft: 2 }}
-                        onMouseEnter={e => e.currentTarget.style.color = C.primaryBright}
-                        onMouseLeave={e => e.currentTarget.style.color = C.textMuted}
-                      >
-                        <Eye size={11} />
-                      </button>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Não cadastrados (collapsible) */}
-        {unmatched.length > 0 && (
-          <details style={{ fontSize: 11 }}>
-            <summary style={{ cursor: 'pointer', color: C.textSoft, userSelect: 'none', fontSize: 11 }}>
-              {unmatched.length} não cadastrado{unmatched.length !== 1 ? 's' : ''} no log
-            </summary>
-            <div style={{ marginTop: 5, color: C.textMuted, lineHeight: 1.7, fontSize: 10 }}>
-              {unmatched.join(' · ')}
-            </div>
-          </details>
-        )}
-
-        {matched.length === 0 && (
-          <div style={{ color: C.textMuted, fontSize: 11, textAlign: 'center', padding: '6px 0' }}>
-            Nenhum tutor cadastrado encontrado neste log.
-          </div>
-        )}
-
-        {/* Aviso atividade automática desligada */}
-        {!_cfg.atividadeAutomatica && (
-          <div style={{ fontSize: 10, color: '#f97316', background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.2)', borderRadius: 6, padding: '5px 8px' }}>
-            Atividade Automática desativada — presenças serão salvas mas não afetarão o cálculo de atividade.
-          </div>
-        )}
-
-        {/* Botão confirmar */}
-        <button
-          onClick={handleConfirmLog}
-          disabled={selecionados.size === 0}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            width: '100%', padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-            background: selecionados.size === 0 ? 'rgba(255,255,255,0.05)' : `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`,
-            border: `1px solid ${selecionados.size === 0 ? C.border : C.primaryBright + '55'}`,
-            color: selecionados.size === 0 ? C.textMuted : C.text,
-            cursor: selecionados.size === 0 ? 'not-allowed' : 'pointer',
-            transition: 'all .15s',
-          }}
-        >
-          <Check size={12} />
-          {selecionados.size === 0
-            ? 'Nenhuma presença para registrar'
-            : (() => {
-                const pendDates = [...new Set([...selecionados].flatMap(id => {
-                  const mi = matched.find(m => m.tutor.id === id)
-                  return mi?.datasNovas?.length ? mi.datasNovas : [dataLog]
-                }))].sort().map(d => `${d.slice(8)}/${d.slice(5,7)}`).join(' e ')
-                return `Registrar ${selecionados.size} presença${selecionados.size !== 1 ? 's' : ''} em ${pendDates}`
-              })()}
-        </button>
-      </div>
-    )
-  }
 
   return (
     <>
@@ -5865,9 +5356,6 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
           {/* Mensagens */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 8px', display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 400, minHeight: 200 }}>
             {msgs.map((m, i) => (
-              m.role === 'log-preview' ? (
-                <div key={i}>{renderLogPreview()}</div>
-              ) : (
                 <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{
                     maxWidth: '85%', padding: '9px 13px',
@@ -5891,7 +5379,6 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
                     ))}
                   </div>
                 </div>
-              )
             ))}
             {msgs.length === 1 && (
               <div style={{ display: 'flex', justifyContent: 'flex-start', paddingLeft: 2 }}>
@@ -5973,51 +5460,9 @@ function FloatingChat({ tutores, setTutores, pendingAuditRef }) {
 
       {/* Overlay para fechar clicando fora */}
       {open && (
-        <div onClick={() => { setOpen(false); setLogMsgModal(null) }} style={{ position: 'fixed', inset: 0, zIndex: 999 }} />
+        <div onClick={() => { setOpen(false) }} style={{ position: 'fixed', inset: 0, zIndex: 999 }} />
       )}
 
-      {/* Modal de mensagens do tutor no log */}
-      {logMsgModal && open && (
-        <div style={{
-          position: 'fixed', bottom: 84, right: 412, width: 340, maxHeight: 480,
-          background: '#0d0f1f', border: `1px solid ${C.border}`,
-          borderRadius: 18, zIndex: 1002,
-          boxShadow: '0 24px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(99,102,241,0.15)',
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          animation: 'fade-in .15s ease',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: `1px solid ${C.border}`, background: `linear-gradient(135deg, ${C.primary}18, transparent)`, flexShrink: 0 }}>
-            <MessageSquare size={13} color={C.primaryBright} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{logMsgModal.nick}</div>
-              <div style={{ fontSize: 10, color: C.textMuted }}>{logMsgModal.msgs.length} msg{logMsgModal.msgs.length !== 1 ? 's' : ''} no log</div>
-            </div>
-            <button onClick={() => setLogMsgModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.textMuted, padding: 4, display: 'flex', flexShrink: 0 }}>
-              <X size={13} />
-            </button>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {logMsgModal.msgs.map((msg, i) => {
-              const dataBadge = logMsgModal.spansMidnight
-                ? (msg.depois
-                    ? `${(logMsgModal.data2 || '').slice(8)}/${(logMsgModal.data2 || '').slice(5,7)}`
-                    : `${logMsgModal.dataLog.slice(8)}/${logMsgModal.dataLog.slice(5,7)}`)
-                : null
-              return (
-                <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '4px 6px', borderRadius: 7, background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}44` }}>
-                  <span style={{ fontSize: 10, color: C.textMuted, fontFamily: 'monospace', flexShrink: 0, marginTop: 1 }}>{msg.time}</span>
-                  {dataBadge && (
-                    <span style={{ fontSize: 9, color: msg.depois ? '#22c55e' : C.primaryBright, background: msg.depois ? 'rgba(34,197,94,0.1)' : 'rgba(99,102,241,0.1)', borderRadius: 4, padding: '1px 4px', flexShrink: 0, marginTop: 1 }}>
-                      {dataBadge}
-                    </span>
-                  )}
-                  <span style={{ fontSize: 11, color: C.textSoft, lineHeight: 1.45, wordBreak: 'break-word' }}>{msg.text}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Botão flutuante */}
       <button
@@ -6720,12 +6165,19 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     setSettingsOpen(false)
   }
 
+  const [replies, setReplies] = useState({})
+
   // Carrega do servidor (SQLite via API)
   useEffect(() => {
     Promise.all([
       apiFetch('/api/tutores').then(r => r.json()),
       apiFetch('/api/settings').then(r => r.json()).catch(() => ({})),
-    ]).then(([tutoresData, settingsData]) => {
+      apiFetch('/api/replies').then(r => r.json()).catch(() => ({})),
+    ]).then(([tutoresData, settingsData, repliesData]) => {
+      if (repliesData && !repliesData.error) {
+        _replies = repliesData
+        setReplies(repliesData)
+      }
       setTutores(Array.isArray(tutoresData) ? tutoresData : [])
       dataLoadOkRef.current = true
       if (settingsData && !settingsData.error && Object.keys(settingsData).length > 0) {
@@ -6754,6 +6206,22 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
     }, 600)
     return () => clearTimeout(saveTimer.current)
   }, [tutores, dataLoaded])
+
+  // Salva as replies do formulário mensal e recarrega tutores (a atividade é
+  // computada no servidor a partir delas).
+  const handleSaveReplies = useCallback(async payload => {
+    const r = await apiFetch('/api/replies', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replies: payload }),
+    })
+    if (!r.ok) throw new Error('Falha ao salvar replies')
+    const [fresh, freshTutores] = await Promise.all([
+      apiFetch('/api/replies').then(x => x.json()).catch(() => null),
+      apiFetch('/api/tutores').then(x => x.json()).catch(() => null),
+    ])
+    if (fresh && !fresh.error) { _replies = fresh; setReplies(fresh) }
+    if (Array.isArray(freshTutores)) { fromPollRef.current = true; setTutores(freshTutores) }
+  }, [])
 
   // Polling dinâmico: atualiza tutores sem precisar recarregar a página
   useEffect(() => {
@@ -6785,8 +6253,8 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
             </div>
           ) : (
             <>
-              {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} cfg={cfg} pendingAuditRef={pendingAuditRef} />}
-              {tab === 'dashboard' && <DashboardTab tutores={tutores} servers={serversProp} envConfigs={envConfigs} cfg={cfg} meInfo={meInfo} />}
+              {tab === 'cadastro'  && <CadastroTab  tutores={tutores} setTutores={setTutores} cfg={cfg} replies={replies} onSaveReplies={handleSaveReplies} pendingAuditRef={pendingAuditRef} />}
+              {tab === 'dashboard' && <DashboardTab tutores={tutores} servers={serversProp} envConfigs={envConfigs} cfg={cfg} replies={replies} meInfo={meInfo} />}
             </>
           )}
         </main>
