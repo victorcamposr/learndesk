@@ -2891,7 +2891,7 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
       ``,
       `${'━'.repeat(50)}`,
       ``,
-      `O comprovante de Nitro se encontra em anexo neste e-mail.`,
+      `Os comprovantes de Nitro se encontram em anexo neste e-mail.`,
       ``,
       `Atenciosamente,`,
       `Campin & Nyxvire`,
