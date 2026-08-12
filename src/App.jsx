@@ -2875,8 +2875,8 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
       // Só aparece para quem tem impulso marcado — quem não tem não gera linha.
       return [
         `${i + 1}. ${m.nick}${cargoExibido ? ` — ${cargoExibido}` : ''}`,
-        impulsos.length ? `   >> IMPULSO NITRO: ${impulsos.join(' + ')}` : null,
-        obs ? `   >> Obs: ${obs}` : null,
+        impulsos.length ? `   • Impulso Nitro ativo: ${impulsos.join(' e ')}` : null,
+        obs ? `   • Obs: ${obs}` : null,
       ].filter(Boolean).join('\n')
     }).join('\n\n')
 
