@@ -94,7 +94,7 @@ const PERIODOS   = ['Manhã', 'Tarde', 'Noite']
 const DIAS_SEMANA = ['Semana', 'FDS', 'Ambos']
 
 // Faixas de replies mensais → nível de atividade.
-const DEFAULT_CFG = { baixaMax: 20, moderadaMax: 50 }
+const DEFAULT_CFG = { baixaMax: 60, moderadaMax: 100 }
 
 let _cfg = { ...DEFAULT_CFG }
 

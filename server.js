@@ -159,8 +159,8 @@ const AUTH_COOKIE_OPTS = {
 // A atividade vem das replies mensais informadas manualmente (formulário que
 // chega todo início de mês). O mês de referência é sempre o mês anterior — é o
 // último período fechado, e o único com número consolidado.
-const DEFAULT_BAIXA_MAX    = 20
-const DEFAULT_MODERADA_MAX = 50
+const DEFAULT_BAIXA_MAX    = 60
+const DEFAULT_MODERADA_MAX = 100
 
 function mesRefKey(hoje) {
   const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
@@ -210,6 +210,20 @@ function enrichTutores(tutores, settings, replies, hoje) {
 const serverKey = (req, key) => {
   const s = req.headers['x-server']
   return (s && getValidServers().includes(s)) ? `${key}:${s}` : key
+}
+
+// Settings da era de presenças traziam baixaMax/moderadaMax em DIAS (7/15).
+// Como agora a unidade é replies, esses valores classificariam quase todo mundo
+// como Alta — então migram uma única vez para os defaults.
+function getSettings(req) {
+  const key   = serverKey(req, 'settings')
+  const saved = getKV(key) || {}
+  const legado = 'atividadeAutomatica' in saved || 'presencaApenasEmTeste' in saved || 'diasParaAlerta' in saved
+  if (!legado) return saved
+  const migrado = { baixaMax: DEFAULT_BAIXA_MAX, moderadaMax: DEFAULT_MODERADA_MAX }
+  setKV(key, migrado)
+  addAuditLog('sistema', 'settings_save', { server: req.headers['x-server'] || '?', ...migrado, via: 'migração replies' })
+  return migrado
 }
 
 const app = express()
@@ -528,7 +542,7 @@ app.get('/api/geo', async (req, res) => {
 // ── Rotas protegidas ───────────────────────────────────────────────────────────
 app.get('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
   let tutores = getKV(serverKey(req, 'tutores')) || []
-  const settings = getKV(serverKey(req, 'settings')) || {}
+  const settings = getSettings(req)
   const hoje = new Date()
   const todayIso = hoje.toISOString().slice(0, 10)
   let modified = false
@@ -632,7 +646,7 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
     role: typeof h?.role === 'string' ? h.role : '',
     text: typeof h?.text === 'string' ? h.text.slice(0, 500) : '',
   })).filter(h => h.role && h.text)
-  const srvSettings = getKV(serverKey(req, 'settings')) || {}
+  const srvSettings = getSettings(req)
 
   const today = new Date()
   const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
@@ -691,7 +705,7 @@ app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (re
   }
 })
 
-app.get('/api/settings', requireAuth, requireServerAccess, (req, res) => res.json(getKV(serverKey(req, 'settings')) || {}))
+app.get('/api/settings', requireAuth, requireServerAccess, (req, res) => res.json(getSettings(req)))
 
 app.post('/api/settings', requireAuth, requireAdmin, requireServerAccess, (req, res) => {
   const { settings } = req.body || {}

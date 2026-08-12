@@ -87,3 +87,9 @@ select option {
 
 button:not(:disabled):hover { filter: brightness(1.18); }
 button:not(:disabled) { transition: filter .15s; }
+
+/* Inputs numéricos sem as setinhas de incremento — os números aqui são
+   digitados por inteiro (replies do mês, faixas), nunca ajustados de 1 em 1. */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; appearance: textfield; }
