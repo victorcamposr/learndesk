@@ -2872,16 +2872,13 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
         m.nitroStaff   && 'servidor da Staff',
       ].filter(Boolean)
       const cargoExibido = m.cargo === 'Em Teste' ? 'Tutor' : m.cargo
+      // Só aparece para quem tem impulso marcado — quem não tem não gera linha.
       return [
         `${i + 1}. ${m.nick}${cargoExibido ? ` — ${cargoExibido}` : ''}`,
-        impulsos.length
-          ? `   >> IMPULSO NITRO: ${impulsos.join(' + ')}`
-          : `   >> IMPULSO NITRO: nenhum`,
+        impulsos.length ? `   >> IMPULSO NITRO: ${impulsos.join(' + ')}` : null,
         obs ? `   >> Obs: ${obs}` : null,
       ].filter(Boolean).join('\n')
     }).join('\n\n')
-
-    const comImpulso = membros.filter(m => m.nitroOficial || m.nitroStaff).length
 
     const corpo = [
       `${saudacao}!`,
@@ -2893,10 +2890,6 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
       linhas,
       ``,
       `${'━'.repeat(50)}`,
-      ``,
-      `IMPULSO NITRO — ${comImpulso} de ${membros.length} ${membros.length === 1 ? 'membro impulsiona' : 'membros impulsionam'} o servidor.`,
-      `Cada linha acima indica onde o impulso está ativo: no servidor Oficial, no servidor da Staff, ou em ambos.`,
-      `Quem aparece como "nenhum" não possui impulso ativo no momento.`,
       ``,
       `O comprovante de pagamento se encontra em anexo neste e-mail.`,
       ``,

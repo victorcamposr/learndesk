@@ -12,6 +12,10 @@ import { parseCommand } from './commandParser.js'
 import Database from 'better-sqlite3'
 import 'dotenv/config'
 
+// Fuso fixo: a virada do mês de referência das replies precisa acontecer à
+// meia-noite de Brasília, não do fuso da VPS.
+process.env.TZ = process.env.TZ || 'America/Sao_Paulo'
+
 // Cookie é Secure+SameSite=None em produção (cross-origin), Lax em dev (localhost)
 const IS_PROD = !!(process.env.ALLOWED_ORIGINS || '').includes('github.io')
 
