@@ -2794,27 +2794,17 @@ function SummaryCard({ label, value, sub, color, icon: Icon }) {
 }
 
 // ── PagamentoEmailModal ───────────────────────────────────────────────────────
-function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meInfo }) {
+function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs }) {
   const hoje = new Date()
-  const mesAtual = hoje.getMonth()
-  const anoAtual = hoje.getFullYear()
 
+  // Data de entrada não filtra mais: a compensação é sempre do mês passado, e
+  // quem entrou no dia 16 ou depois também recebe.
   const aptos = useMemo(() => tutores.filter(t => {
     // Usa campo pré-computado pelo servidor quando disponível
     if (t.apto != null) return t.apto
     // Fallback: cálculo local (tutores recém-modificados que ainda não sincronizaram)
     if (t.cargo === 'Inativo' || t.cargo === 'Desligado') return false
-    if (!t.dataInicio) return false
-    const inicio = new Date(t.dataInicio + 'T00:00:00')
-    const anoI = inicio.getFullYear()
-    const mesI = inicio.getMonth()
-    const diaI = inicio.getDate()
-    if (anoI < anoAtual || (anoI === anoAtual && mesI < mesAtual)) return true
-    if (anoI === anoAtual && mesI === mesAtual) {
-      if (diaI <= 15) return true
-      if (diaI <= 16 && getAtividade(t) === 'Alta') return true
-    }
-    return false
+    return !!t.dataInicio
   }), [tutores])
 
   const [mundo, setMundo]     = useState(() => {
@@ -2872,22 +2862,31 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meIn
     const nomeWorld = mundo.trim() || '[Nome do Mundo]'
     const assunto = `${nomeWorld} - NITRO e Pagamento (${dataPag})`
 
-    const assinante = meInfo?.apelido || 'Equipe'
+    const h = new Date().getHours()
+    const saudacao = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'
+
     const linhas = membros.map((m, i) => {
       const obs = m.obsEmail.trim()
-      const impulsos = [m.nitroOficial && 'Oficial', m.nitroStaff && 'Staff'].filter(Boolean)
+      const impulsos = [
+        m.nitroOficial && 'servidor Oficial',
+        m.nitroStaff   && 'servidor da Staff',
+      ].filter(Boolean)
       const cargoExibido = m.cargo === 'Em Teste' ? 'Tutor' : m.cargo
       return [
         `${i + 1}. ${m.nick}${cargoExibido ? ` — ${cargoExibido}` : ''}`,
-        impulsos.length ? `   Impulsos: ${impulsos.join(' / ')}` : `   (sem impulsos)`,
-        obs ? `   **Obs: ${obs}**` : null,
+        impulsos.length
+          ? `   >> IMPULSO NITRO: ${impulsos.join(' + ')}`
+          : `   >> IMPULSO NITRO: nenhum`,
+        obs ? `   >> Obs: ${obs}` : null,
       ].filter(Boolean).join('\n')
     }).join('\n\n')
 
+    const comImpulso = membros.filter(m => m.nitroOficial || m.nitroStaff).length
+
     const corpo = [
-      `Olá!`,
+      `${saudacao}!`,
       ``,
-      `Segue a lista de membros aptos a receber a compensação — ${nomeWorld}:`,
+      `Segue a lista dos tutores e senior tutores aptos para receber a compensação — ${nomeWorld}:`,
       ``,
       `${'━'.repeat(50)}`,
       ``,
@@ -2895,8 +2894,14 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meIn
       ``,
       `${'━'.repeat(50)}`,
       ``,
+      `IMPULSO NITRO — ${comImpulso} de ${membros.length} ${membros.length === 1 ? 'membro impulsiona' : 'membros impulsionam'} o servidor.`,
+      `Cada linha acima indica onde o impulso está ativo: no servidor Oficial, no servidor da Staff, ou em ambos.`,
+      `Quem aparece como "nenhum" não possui impulso ativo no momento.`,
+      ``,
+      `O comprovante de pagamento se encontra em anexo neste e-mail.`,
+      ``,
       `Atenciosamente,`,
-      `${assinante} — ${nomeWorld}`,
+      `Campin & Nyxvire`,
     ].join('\n')
 
     setEmailGerado({ assunto, corpo })
@@ -3003,8 +3008,9 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meIn
             {membros.map(m => {
               const inicio = m.dataInicio ? new Date(m.dataInicio + 'T00:00:00') : null
               const diaI = inicio ? inicio.getDate() : null
-              const isExtra = diaI !== null && diaI >= 16
-                && inicio.getMonth() === mesAtual && inicio.getFullYear() === anoAtual
+              // Marcador informativo: entrou na segunda metade de um mês recente
+              // (referência ou atual) — vale conferir antes de enviar.
+              const isExtra = diaI !== null && diaI >= 16 && m.dataInicio.slice(0, 7) >= mesRefKey()
 
               return (
                 <div key={m.id} style={{
@@ -3025,7 +3031,7 @@ function PagamentoEmailModal({ open, onClose, tutores, servers, envConfigs, meIn
                         )}
                         {isExtra && (
                           <span style={{ fontSize: 10, color: C.gold, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.28)', borderRadius: 4, padding: '2px 7px' }}>
-                            dia 16 + Alta
+                            entrou dia 16+
                           </span>
                         )}
                       </div>
@@ -3363,7 +3369,7 @@ function DashboardTab({ tutores, servers, envConfigs, cfg, replies, meInfo }) {
   return (
     <div style={{ maxWidth: 1220, margin: '0 auto', padding: '28px 24px' }}>
 
-      <PagamentoEmailModal open={pagamentoOpen} onClose={() => setPagamentoOpen(false)} tutores={tutores} servers={servers} envConfigs={envConfigs} meInfo={meInfo} />
+      <PagamentoEmailModal open={pagamentoOpen} onClose={() => setPagamentoOpen(false)} tutores={tutores} servers={servers} envConfigs={envConfigs} />
 
       {/* Ação rápida — Email de Pagamento */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
@@ -3458,15 +3464,30 @@ function DashboardTab({ tutores, servers, envConfigs, cfg, replies, meInfo }) {
           {
             title: 'Distribuição por Cargo', Icon: BarChart2,
             content: (
-              <ResponsiveContainer width="100%" height={230}>
-                <PieChart>
-                  <Pie data={cargoData} cx="50%" cy="50%" innerRadius={58} outerRadius={88} dataKey="value"
-                    label={({ name, value }) => `${name} (${value})`} labelLine={{ stroke: C.border }}>
-                    {cargoData.map((e, i) => <Cell key={i} fill={CARGO_COLORS[e.name] || PIE_COLORS[i % PIE_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip content={<RechartTooltip />} />
-                </PieChart>
-              </ResponsiveContainer>
+              // Legenda embaixo em vez de rótulos externos: os rótulos do topo
+              // estouravam a borda do card e ficavam cortados.
+              <>
+                <ResponsiveContainer width="100%" height={190}>
+                  <PieChart>
+                    <Pie data={cargoData} cx="50%" cy="50%" innerRadius={52} outerRadius={82} dataKey="value">
+                      {cargoData.map((e, i) => <Cell key={i} fill={CARGO_COLORS[e.name] || PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip content={<RechartTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', justifyContent: 'center', marginTop: 4 }}>
+                  {cargoData.map((e, i) => {
+                    const cor = CARGO_COLORS[e.name] || PIE_COLORS[i % PIE_COLORS.length]
+                    return (
+                      <span key={e.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.textSoft }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: cor, display: 'inline-block', boxShadow: `0 0 6px ${cor}70`, flexShrink: 0 }} />
+                        {e.name}
+                        <span style={{ color: cor, fontWeight: 700 }}>{e.value}</span>
+                      </span>
+                    )
+                  })}
+                </div>
+              </>
             ),
           },
           {

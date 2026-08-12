@@ -183,27 +183,17 @@ function calcAtividade(tutor, settings, replies, hoje) {
   )
 }
 
-function calcApto(tutor, atividadeCalculada, hoje) {
+// A compensação é sempre referente ao mês passado e quem entrou no dia 16 ou
+// depois também recebe — então a data de entrada não filtra mais ninguém.
+function calcApto(tutor) {
   if (tutor.cargo === 'Inativo' || tutor.cargo === 'Desligado') return false
-  if (!tutor.dataInicio) return false
-  const inicio = new Date(tutor.dataInicio + 'T00:00:00')
-  const anoAtual = hoje.getFullYear()
-  const mesAtual = hoje.getMonth()
-  const anoI = inicio.getFullYear()
-  const mesI = inicio.getMonth()
-  const diaI = inicio.getDate()
-  if (anoI < anoAtual || (anoI === anoAtual && mesI < mesAtual)) return true
-  if (anoI === anoAtual && mesI === mesAtual) {
-    if (diaI <= 15) return true
-    if (diaI <= 16 && atividadeCalculada === 'Alta') return true
-  }
-  return false
+  return !!tutor.dataInicio
 }
 
 function enrichTutores(tutores, settings, replies, hoje) {
   return tutores.map(t => {
     const atividadeCalculada = calcAtividade(t, settings, replies, hoje)
-    return { ...t, atividadeCalculada, apto: calcApto(t, atividadeCalculada, hoje) }
+    return { ...t, atividadeCalculada, apto: calcApto(t) }
   })
 }
 
