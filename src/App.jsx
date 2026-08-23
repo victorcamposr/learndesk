@@ -390,6 +390,37 @@ function normalizePhone(v) {
   return formatCelular(clean)
 }
 
+// ── Transferência de personagem ───────────────────────────────────────────────
+const TRANSFER_COOLDOWN = 45
+
+function addDias(dateStr, n) {
+  if (!dateStr) return ''
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d + n)
+  const pad = x => String(x).padStart(2, '0')
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+}
+
+function diffDias(de, ate) {
+  if (!de || !ate) return null
+  const parse = str => { const [y, m, d] = str.split('-').map(Number); return new Date(y, m - 1, d) }
+  return Math.round((parse(ate) - parse(de)) / 86400000)
+}
+
+// Estado do delay de 45 dias entre transferências (null se nunca houve)
+function transferenciaInfo(tutor) {
+  const data = tutor?.transferenciaData
+  if (!data) return null
+  const liberacao = tutor.transferenciaLiberacao || addDias(data, TRANSFER_COOLDOWN)
+  const restam    = diffDias(todayStr(), liberacao)
+  return {
+    data, liberacao, restam,
+    liberado:     restam <= 0,
+    nickAnterior: tutor.transferenciaNickAnterior || null,
+    destino:      tutor.transferenciaDestino || null,
+  }
+}
+
 // ── Replies mensais ───────────────────────────────────────────────────────────
 const monthKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 
@@ -883,15 +914,14 @@ function DesligamentoModal({ tutor, open, onClose, onConfirm }) {
     if (!motivo) return
     const today = todayStr()
     let obsText = ''
+    let transfer = null
     if (motivo === 'solicitou_desligamento') {
       obsText = 'Solicitou desligamento.'
       if (detalhes.trim()) obsText += `\n\n${detalhes.trim()}`
     } else if (motivo === 'solicitou_transferencia') {
-      const [y, mo, d] = today.split('-').map(Number)
-      const dt = new Date(y, mo - 1, d + 45)
-      const pad = n => String(n).padStart(2, '0')
-      const date45 = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
+      const date45  = addDias(today, TRANSFER_COOLDOWN)
       const destStr = destino.trim() ? ` para ${destino.trim()}` : ''
+      transfer = { data: today, liberacao: date45, destino: destino.trim() }
       obsText = `Solicitou transferência${destStr} em ${formatDate(today)}.\n\nPoderá solicitar nova transferência somente após ${formatDate(date45)}.`
       if (detalhes.trim()) obsText += `\n\n${detalhes.trim()}`
     } else if (motivo === 'inatividade') {
@@ -900,7 +930,7 @@ function DesligamentoModal({ tutor, open, onClose, onConfirm }) {
       obsText = 'Desligado por má conduta.'
       if (detalhes.trim()) obsText += `\n\n${detalhes.trim()}`
     }
-    onConfirm(obsText)
+    onConfirm(obsText, transfer)
   }
 
   return (
@@ -978,6 +1008,114 @@ function DesligamentoModal({ tutor, open, onClose, onConfirm }) {
           <button style={btn('ghost')} onClick={onClose}><X size={14} /> Cancelar</button>
           <button style={{ ...btn('danger'), opacity: motivo ? 1 : 0.45 }} onClick={handleConfirm} disabled={!motivo}>
             <UserX size={14} /> Confirmar desligamento
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ── TrocaNickModal ────────────────────────────────────────────────────────────
+const NICK_MOTIVOS = [
+  { key: 'transferencia', label: 'Sim — transferência de personagem' },
+  { key: 'renomeacao',    label: 'Não — apenas trocou o nome do char' },
+]
+
+function TrocaNickModal({ tutor, nickNovo, open, onClose, onConfirm }) {
+  const [tipo, setTipo]         = useState(null)
+  const [destino, setDestino]   = useState('')
+  const [detalhes, setDetalhes] = useState('')
+  useEffect(() => { if (open) { setTipo(null); setDestino(''); setDetalhes('') } }, [open])
+
+  const anterior = transferenciaInfo(tutor)
+  const accent   = '#38bdf8'
+
+  const handleConfirm = () => {
+    if (!tipo) return
+    onConfirm({
+      transferencia: tipo === 'transferencia',
+      destino:  destino.trim(),
+      detalhes: detalhes.trim(),
+    })
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Troca de nick — ${tutor?.nick || ''} → ${nickNovo || ''}`}
+      icon={ArrowLeftRight} maxWidth={480} accentColor={accent}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontSize: 13, color: C.textSoft, marginBottom: 2 }}>
+          Essa troca de nick foi uma <strong>transferência de personagem</strong>?
+        </div>
+
+        {NICK_MOTIVOS.map(m => (
+          <button key={m.key} type="button" onClick={() => { setTipo(m.key); setDestino(''); setDetalhes('') }} style={{
+            background: tipo === m.key ? `${accent}18` : 'rgba(255,255,255,0.02)',
+            border: `1px solid ${tipo === m.key ? accent : C.border}`,
+            borderRadius: 10, padding: '11px 16px',
+            color: tipo === m.key ? accent : C.text,
+            cursor: 'pointer', textAlign: 'left', fontSize: 14,
+            fontWeight: tipo === m.key ? 600 : 400,
+            display: 'flex', alignItems: 'center', gap: 10,
+            transition: 'all .15s', fontFamily: "'Space Grotesk', 'Inter', sans-serif",
+          }}>
+            <div style={{
+              width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+              border: `2px solid ${tipo === m.key ? accent : C.textMuted}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: tipo === m.key ? accent : 'transparent',
+            }}>
+              {tipo === m.key && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#0b1220' }} />}
+            </div>
+            {m.label}
+          </button>
+        ))}
+
+        {tipo === 'transferencia' && (
+          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {anterior && !anterior.liberado && (
+              <div style={{
+                background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)',
+                borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#fca5a5', lineHeight: 1.6,
+              }}>
+                <AlertTriangle size={11} style={{ verticalAlign: -1, marginRight: 5 }} />
+                A última transferência foi em <strong>{formatDate(anterior.data)}</strong> — o prazo de 45 dias
+                só vence em <strong>{formatDate(anterior.liberacao)}</strong> (faltam {anterior.restam}d).
+              </div>
+            )}
+            <div>
+              <label style={labelStyle}>De onde veio (servidor / mundo)</label>
+              <input autoFocus style={{ ...inputBase, fontSize: 13 }} value={destino}
+                onChange={e => setDestino(e.target.value)} placeholder="Ex: Grimoria I, Bredot..." />
+            </div>
+            <div>
+              <label style={labelStyle}>Observações adicionais (opcional)</label>
+              <textarea style={{ ...inputBase, minHeight: 60, resize: 'vertical', fontSize: 13 }}
+                value={detalhes} onChange={e => setDetalhes(e.target.value)}
+                placeholder="Outros detalhes relevantes..." />
+            </div>
+            <div style={{
+              background: `${accent}12`, border: `1px solid ${accent}33`,
+              borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#7dd3fc', lineHeight: 1.6,
+            }}>
+              Será registrado automaticamente: nova transferência só <strong>após 45 dias</strong> — liberada em{' '}
+              <strong>{formatDate(addDias(todayStr(), TRANSFER_COOLDOWN))}</strong>.
+            </div>
+          </div>
+        )}
+
+        {tipo === 'renomeacao' && (
+          <div style={{ marginTop: 4 }}>
+            <label style={labelStyle}>Motivo da troca (opcional)</label>
+            <textarea autoFocus style={{ ...inputBase, minHeight: 60, resize: 'vertical', fontSize: 13 }}
+              value={detalhes} onChange={e => setDetalhes(e.target.value)}
+              placeholder="Ex: correção de nome, name change..." />
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
+          <button style={btn('ghost')} onClick={onClose}><X size={14} /> Cancelar</button>
+          <button style={{ ...btn('primary'), opacity: tipo ? 1 : 0.45 }} onClick={handleConfirm} disabled={!tipo}>
+            <Check size={14} /> Confirmar troca
           </button>
         </div>
       </div>
@@ -1118,7 +1256,7 @@ const BLANK = {
   nick: '', nomeRL: '', celular: '', discord: '', cargo: 'Em Teste',
   dataInicio: '', horariosSemana: [], horariosFDS: [],
   detalheHorario: '', obs: '', obsIsDesligamento: false, ausencias: [], dataEfetivacao: '',
-  obsHistorico: [], ausenciaHistorico: [],
+  obsHistorico: [], ausenciaHistorico: [], nickHistorico: [],
 }
 const PERIODO_ICONS = { Manhã: Sun, Tarde: Sunset, Noite: Moon }
 
@@ -1127,7 +1265,9 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
   const [form, setForm]               = useState(BLANK)
   const [errors, setErrors]           = useState({})
   const [desligamentoOpen, setDesligamentoOpen] = useState(false)
+  const [nickModalOpen, setNickModalOpen]       = useState(false)
   const pendingSaveRef                = useRef(null)
+  const nickChangeRef                 = useRef(null)
 
   useEffect(() => {
     if (isEdit) {
@@ -1140,6 +1280,7 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
       setForm(BLANK)
     }
     setErrors({})
+    nickChangeRef.current = null
   }, [editId, isEdit])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -1149,43 +1290,89 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
       return { ...f, [key]: f[key].includes(p) ? f[key].filter(x => x !== p) : [...f[key], p] }
     })
 
+  const originalTutor = isEdit ? tutores.find(x => x.id === editId) : null
+  const nickMudou = !!originalTutor && form.nick.trim() !== (originalTutor.nick || '').trim()
+
   const handleSave = () => {
     const e = {}
     if (!form.nick.trim()) e.nick = 'Nick é obrigatório'
     if (form.dataInicio && form.dataInicio > todayStr()) e.dataInicio = 'Data de início não pode ser futura'
     if (Object.keys(e).length) { setErrors(e); return }
     const horariosStr = serializeHorarios(form.horariosSemana, form.horariosFDS)
-    if (isEdit && form.cargo === 'Desligado') {
-      const originalTutor = tutores.find(x => x.id === editId)
-      if (originalTutor?.cargo !== 'Desligado') {
-        pendingSaveRef.current = horariosStr
-        setDesligamentoOpen(true)
-        return
-      }
-    }
-    if (isEdit) {
-      if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_edit', nick: form.nick }
-      setTutores(prev => prev.map(t => t.id === editId ? { ...form, id: editId, horarios: horariosStr, atividadeCalculada: null, apto: null } : t))
-    } else {
+    if (!isEdit) {
       if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_add', nick: form.nick }
       setTutores(prev => [...prev, { ...form, id: nextId(prev), horarios: horariosStr }])
+      onDone()
+      return
     }
+    // 1º passo: trocou o nick → perguntar se foi transferência de personagem
+    if (nickMudou && !nickChangeRef.current) {
+      pendingSaveRef.current = horariosStr
+      setNickModalOpen(true)
+      return
+    }
+    // 2º passo: virou Desligado → perguntar o motivo
+    if (form.cargo === 'Desligado' && originalTutor?.cargo !== 'Desligado') {
+      pendingSaveRef.current = horariosStr
+      setDesligamentoOpen(true)
+      return
+    }
+    commitEdit(horariosStr, null, null)
+  }
+
+  // Aplica a edição, opcionalmente com obs de desligamento e/ou registro de transferência
+  const commitEdit = (horariosStr, obsText, transfer) => {
+    const nickChange = nickChangeRef.current
+    if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_edit', nick: form.nick }
+    const hoje = todayStr()
+    setTutores(prev => prev.map(t => {
+      if (t.id !== editId) return t
+      const next = { ...form, id: editId, horarios: horariosStr, atividadeCalculada: null, apto: null }
+      if (obsText != null) {
+        const oldObs = (t.obs || '').trim()
+        next.obsHistorico = oldObs
+          ? [...(t.obsHistorico || []), { id: Date.now(), texto: oldObs, data: hoje }]
+          : (t.obsHistorico || [])
+        next.obs = obsText
+        next.obsIsDesligamento = true
+      }
+      if (nickChange) {
+        next.nickHistorico = [...(t.nickHistorico || []), {
+          id: Date.now() + 1,
+          de: t.nick, para: form.nick.trim(), data: hoje,
+          transferencia: nickChange.transferencia,
+          origem: nickChange.destino || '',
+          detalhes: nickChange.detalhes || '',
+        }]
+        if (nickChange.transferencia) {
+          next.transferenciaData         = hoje
+          next.transferenciaLiberacao    = addDias(hoje, TRANSFER_COOLDOWN)
+          next.transferenciaNickAnterior = t.nick
+          if (nickChange.destino) next.transferenciaDestino = nickChange.destino
+        }
+      }
+      if (transfer) {
+        next.transferenciaData      = transfer.data
+        next.transferenciaLiberacao = transfer.liberacao
+        if (transfer.destino) next.transferenciaDestino = transfer.destino
+      }
+      return next
+    }))
+    nickChangeRef.current = null
+    pendingSaveRef.current = null
+    setDesligamentoOpen(false)
+    setNickModalOpen(false)
     onDone()
   }
 
-  const handleDesligamentoConfirm = (obsText) => {
-    const horariosStr = pendingSaveRef.current
-    if (pendingAuditRef) pendingAuditRef.current = { action: 'tutor_edit', nick: form.nick }
-    setTutores(prev => prev.map(t => {
-      if (t.id !== editId) return t
-      const oldObs = (t.obs || '').trim()
-      const newHistorico = oldObs
-        ? [...(t.obsHistorico || []), { id: Date.now(), texto: oldObs, data: todayStr() }]
-        : (t.obsHistorico || [])
-      return { ...form, id: editId, horarios: horariosStr, atividadeCalculada: null, apto: null, obs: obsText, obsIsDesligamento: true, obsHistorico: newHistorico }
-    }))
-    setDesligamentoOpen(false)
-    onDone()
+  const handleNickConfirm = (result) => {
+    nickChangeRef.current = result
+    setNickModalOpen(false)
+    handleSave()   // segue o fluxo (pode ainda cair no modal de desligamento)
+  }
+
+  const handleDesligamentoConfirm = (obsText, transfer) => {
+    commitEdit(pendingSaveRef.current, obsText, transfer)
   }
 
   const inp = field => ({ ...inputBase, borderColor: errors[field] ? '#ef4444' : C.border })
@@ -1279,10 +1466,17 @@ function TutorForm({ tutores, setTutores, editId, onDone, pendingAuditRef }) {
         <button style={btn('gold', 'lg')} onClick={handleSave}><Save size={15} /> {isEdit ? 'Salvar Alterações' : 'Cadastrar Tutor'}</button>
       </div>
     </div>
+    <TrocaNickModal
+      tutor={originalTutor}
+      nickNovo={form.nick.trim()}
+      open={nickModalOpen}
+      onClose={() => { setNickModalOpen(false); pendingSaveRef.current = null; nickChangeRef.current = null }}
+      onConfirm={handleNickConfirm}
+    />
     <DesligamentoModal
-      tutor={isEdit ? tutores.find(x => x.id === editId) : null}
+      tutor={originalTutor}
       open={desligamentoOpen}
-      onClose={() => { setDesligamentoOpen(false); pendingSaveRef.current = null }}
+      onClose={() => { setDesligamentoOpen(false); pendingSaveRef.current = null; nickChangeRef.current = null }}
       onConfirm={handleDesligamentoConfirm}
     />
     </>
@@ -4675,6 +4869,7 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
   const accentColor    = pendente ? '#f59e0b' : emAusencia ? '#8b5cf6' : atividadeColor
   const activeMonthLabel = mesLabelLongo(activeMonth)
   const maxReplies     = Math.max(...chartData.map(d => d.replies), 1)
+  const transf         = transferenciaInfo(tutor)
 
   const infoRow = (Icon, label, value, color) => value ? (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4726,6 +4921,11 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
                   <AlertTriangle size={10} /> Replies de {mesLabel(mesRef)} pendentes
                 </span>
               )}
+              {transf && !transf.liberado && (
+                <span style={{ background: 'rgba(56,189,248,0.14)', border: '1px solid rgba(56,189,248,0.45)', borderRadius: 6, color: '#7dd3fc', fontSize: 11, fontWeight: 700, padding: '3px 9px', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <ArrowLeftRight size={10} /> Transferência: faltam {transf.restam}d
+                </span>
+              )}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
@@ -4744,6 +4944,53 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
           {infoRow(Clock,    'Horários', tutor.horarios !== '?' ? tutor.horarios : null)}
           {tutor.detalheHorario && infoRow(Clock, 'Detalhe', tutor.detalheHorario)}
         </div>
+
+        {/* Delay de 45 dias entre transferências de personagem */}
+        {transf && (() => {
+          const cor = transf.liberado ? '#34d399' : '#38bdf8'
+          const pct = Math.min(100, Math.max(0, Math.round(((TRANSFER_COOLDOWN - Math.max(0, transf.restam)) / TRANSFER_COOLDOWN) * 100)))
+          return (
+            <div style={{ background: `${cor}0a`, border: `1px solid ${cor}33`, borderRadius: 10, padding: '12px 14px' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: cor, textTransform: 'uppercase', letterSpacing: '.08em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ArrowLeftRight size={12} /> Transferência de personagem
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {transf.nickAnterior && (
+                    <div style={{ fontSize: 12, color: C.textSoft }}>
+                      <span style={{ color: C.textMuted }}>{transf.nickAnterior}</span>
+                      <ArrowLeftRight size={10} style={{ margin: '0 6px', verticalAlign: -1, color: cor }} />
+                      <strong style={{ color: C.text }}>{tutor.nick}</strong>
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: C.textMuted }}>
+                    Última transferência em <strong style={{ color: C.textSoft }}>{formatDate(transf.data)}</strong>
+                    {transf.destino ? ` — ${transf.destino}` : ''}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.textMuted }}>
+                    Nova transferência liberada em <strong style={{ color: cor }}>{formatDate(transf.liberacao)}</strong>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.03em', ...gText(cor), fontVariantNumeric: 'tabular-nums' }}>
+                    {transf.liberado ? 'Liberado' : `${transf.restam}d`}
+                  </div>
+                  <div style={{ fontSize: 10, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                    {transf.liberado ? 'pode transferir' : `de ${TRANSFER_COOLDOWN} dias`}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', width: `${pct}%`, borderRadius: 4, transition: 'width .4s',
+                  background: `linear-gradient(90deg, ${cor}80, ${cor})`, boxShadow: `0 0 8px ${cor}60`,
+                }} />
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Replies do mês selecionado */}
         <div>
@@ -4841,7 +5088,7 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
         })()}
 
         {/* Histórico — colapsável */}
-        {((tutor.obsHistorico?.length > 0) || (tutor.ausenciaHistorico?.length > 0)) && (
+        {((tutor.obsHistorico?.length > 0) || (tutor.ausenciaHistorico?.length > 0) || (tutor.nickHistorico?.length > 0)) && (
           <div>
             <button onClick={() => setShowHistorico(v => !v)} style={{
               ...btn('ghost', 'sm'), width: '100%', justifyContent: 'space-between',
@@ -4851,13 +5098,39 @@ function TutorProfileModal({ tutor, open, onClose, onDeleteObsHistorico, onDelet
                 <History size={12} />
                 Histórico
                 <span style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 99, fontSize: 10, fontWeight: 700, padding: '1px 6px', color: C.textMuted }}>
-                  {(tutor.obsHistorico?.length || 0) + (tutor.ausenciaHistorico?.length || 0)}
+                  {(tutor.obsHistorico?.length || 0) + (tutor.ausenciaHistorico?.length || 0) + (tutor.nickHistorico?.length || 0)}
                 </span>
               </span>
               {showHistorico ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             </button>
             {showHistorico && (
               <div style={{ marginTop: 10 }}>
+                {(tutor.nickHistorico || []).length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 6 }}>Nicks anteriores</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {[...(tutor.nickHistorico || [])].reverse().map(h => (
+                        <div key={h.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <ArrowLeftRight size={11} color={h.transferencia ? '#38bdf8' : C.textMuted} style={{ flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, color: C.textSoft }}>
+                              {h.de} → <strong style={{ color: C.text }}>{h.para}</strong>
+                              <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: h.transferencia ? '#7dd3fc' : C.textMuted }}>
+                                {h.transferencia ? 'transferência' : 'troca de nome'}
+                              </span>
+                            </div>
+                            {(h.origem || h.detalhes) && (
+                              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2, whiteSpace: 'pre-line' }}>
+                                {[h.origem && `De: ${h.origem}`, h.detalhes].filter(Boolean).join(' · ')}
+                              </div>
+                            )}
+                            <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>{formatDate(h.data)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {(tutor.obsHistorico || []).length > 0 && (
                   <div style={{ marginBottom: 10 }}>
                     <div style={{ fontSize: 10, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 6 }}>Observações anteriores</div>
