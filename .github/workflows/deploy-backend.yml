@@ -14,30 +14,37 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Preparar chave SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
       - name: Enviar arquivos do backend
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: 'server.js,commandParser.js,package.json,package-lock.json'
-          target: /opt/rubinot/app
+        run: |
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes \
+            server.js commandParser.js package.json package-lock.json \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/rubinot/app/"
 
       - name: Rebuild e restart do container
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            set -e
-            # Caminho explicito: e exatamente o que /etc/sudoers.d/rubinot-deploy autoriza.
-            sudo docker compose -f /opt/rubinot/docker-compose.yml build api
-            sudo docker compose -f /opt/rubinot/docker-compose.yml up -d api
-            sleep 5
-            sudo docker compose -f /opt/rubinot/docker-compose.yml ps api
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTE'
+          set -e
+          C="sudo docker compose -f /opt/rubinot/docker-compose.yml"
+          $C build api
+          $C up -d api
+          sleep 5
+          $C ps api
+          REMOTE
+
+      - name: Limpar chave
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
