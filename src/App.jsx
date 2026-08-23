@@ -252,11 +252,32 @@ const BASE = import.meta.env.BASE_URL
 
 let onUnauthorized = null
 
+// Timeouts de rede. Sem isso, se a VPS cair o fetch fica pendurado no
+// timeout de conexão do browser (minutos) e a tela trava em "carregando".
+const TIMEOUT_BOOT    = 12000   // checagem inicial — falha rápido pra mostrar o erro
+const TIMEOUT_DEFAULT = 30000   // requisições comuns
+const TIMEOUT_IA      = 120000  // /api/chat, que depende do Gemini
+
+function isTimeout(err) {
+  return err?.name === 'TimeoutError' || err?.name === 'AbortError'
+}
+
+function fetchWithTimeout(url, opts = {}) {
+  const { timeout = TIMEOUT_DEFAULT, signal, ...rest } = opts
+  const ctrl  = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(new DOMException('Tempo esgotado', 'TimeoutError')), timeout)
+  if (signal) {
+    if (signal.aborted) ctrl.abort(signal.reason)
+    else signal.addEventListener('abort', () => ctrl.abort(signal.reason), { once: true })
+  }
+  return fetch(url, { ...rest, signal: ctrl.signal }).finally(() => clearTimeout(timer))
+}
+
 function apiFetch(url, opts = {}) {
   const token  = getToken()
   const server = getServer()
   const device = getDeviceToken()
-  return fetch(API + url, {
+  return fetchWithTimeout(API + url, {
     ...opts,
     headers: {
       ...(opts.headers || {}),
@@ -5314,6 +5335,7 @@ As replies mensais são preenchidas na aba Cadastro → "Replies do Mês".` },
     try {
       const res = await apiFetch('/api/chat', {
         method: 'POST',
+        timeout: TIMEOUT_IA,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg, history: msgs.slice(-8), tutores }),
       })
@@ -5941,6 +5963,7 @@ function LoginScreen({ apelido, onLogin, justApproved }) {
 
 function AuthGate() {
   const [status, setStatus]             = useState('checking')
+  const [connErrorKind, setConnErrorKind] = useState('network')
   const [justApproved, setJustApproved] = useState(false)
   const [servers, setServers]           = useState(SERVERS)
   const [envConfigs, setEnvConfigs]     = useState({})
@@ -5948,6 +5971,7 @@ function AuthGate() {
   const [adminSkipMsg, setAdminSkipMsg] = useState('')
   const [deviceApelido, setDeviceApelido] = useState('')
   const wasAwaitingRef                  = useRef(false)
+  const retryCountRef                   = useRef(0)
 
   useEffect(() => {
     if (!adminSkipMsg) return
@@ -5987,9 +6011,11 @@ function AuthGate() {
     const deviceToken = getDeviceToken()
     if (!deviceToken) { setStatus('request-access'); return }
 
+    setStatus('checking')
     try {
-      const r = await fetch(API + '/api/auth/device-status', {
+      const r = await fetchWithTimeout(API + '/api/auth/device-status', {
         method: 'POST',
+        timeout: TIMEOUT_BOOT,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceToken }),
       })
@@ -6000,7 +6026,8 @@ function AuthGate() {
         if (needsPassword) { setStatus('set-password'); return }
 
         const authToken = getToken()
-        const vr = await fetch(API + '/api/auth/verify', {
+        const vr = await fetchWithTimeout(API + '/api/auth/verify', {
+          timeout: TIMEOUT_BOOT,
           headers: {
             'x-device-token': deviceToken,
             ...(authToken ? { 'x-auth-token': authToken } : {}),
@@ -6036,12 +6063,23 @@ function AuthGate() {
       } else {
         setStatus('request-access')
       }
-    } catch {
+    } catch (err) {
+      setConnErrorKind(isTimeout(err) ? 'timeout' : 'network')
       setStatus('conn-error')
     }
   }, [loadEnvData])
 
   useEffect(() => { checkDevice() }, [checkDevice])
+
+  // Servidor fora do ar → retenta sozinho com backoff, pra reconectar
+  // assim que a API voltar sem o usuário precisar recarregar a página.
+  useEffect(() => {
+    if (status !== 'conn-error') { retryCountRef.current = 0; return }
+    const delay = Math.min(30000, 5000 * 2 ** retryCountRef.current)
+    retryCountRef.current += 1
+    const t = setTimeout(checkDevice, delay)
+    return () => clearTimeout(t)
+  }, [status, checkDevice])
 
   const handleRequestAccess = async (apelido = '') => {
     let deviceToken = getDeviceToken()
@@ -6095,8 +6133,14 @@ function AuthGate() {
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: C.bg, gap: 16 }}>
       <BackgroundImage />
       <div style={{ position: 'relative', zIndex: 1, textAlign: 'center' }}>
-        <div style={{ fontSize: 15, color: C.text, marginBottom: 8 }}>Erro de conexão com o servidor</div>
-        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 20 }}>Verifique se o servidor está online e tente novamente.</div>
+        <div style={{ fontSize: 15, color: C.text, marginBottom: 8 }}>
+          {connErrorKind === 'timeout' ? 'Servidor não respondeu' : 'Erro de conexão com o servidor'}
+        </div>
+        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 20, maxWidth: 320, lineHeight: 1.5 }}>
+          {connErrorKind === 'timeout'
+            ? 'O servidor está fora do ar ou muito lento. Tentando de novo automaticamente…'
+            : 'Não foi possível alcançar o servidor. Verifique sua conexão.'}
+        </div>
         <button onClick={checkDevice} style={{ background: C.primary, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, cursor: 'pointer' }}>
           Tentar novamente
         </button>
