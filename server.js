@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { parseCommand } from './commandParser.js'
+import { coletar, INATIVO_DIAS } from './rubinotWatch.js'
 import Database from 'better-sqlite3'
 import 'dotenv/config'
 
@@ -261,6 +262,13 @@ const geminiLimiter = IS_TEST ? noopMiddleware : rateLimit({
   windowMs: 60 * 1000,
   max: 10,
   message: { error: 'Muitas chamadas à IA. Tente novamente em 1 minuto.' },
+  standardHeaders: true, legacyHeaders: false,
+})
+
+const rubinotLimiter = IS_TEST ? noopMiddleware : rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 3,
+  message: { error: 'Coleta já solicitada há pouco. Aguarde alguns minutos.' },
   standardHeaders: true, legacyHeaders: false,
 })
 
@@ -863,6 +871,105 @@ app.post('/api/auth/devices/:token/permissions', requireAuth, requireAdmin, (req
   const targetApelido = getDevices()[token]?.apelido || token.slice(0, 8)
   addAuditLog(getDeviceApelido(req) || 'admin', 'device_permissions', { target: targetApelido, role: finalRole, allowedServers: finalServers })
   res.json({ ok: true })
+})
+
+// ── Rubinot watch ──────────────────────────────────────────────────────────────
+//
+// Uma vez por dia consulta cada tutor na API pública do Rubinot e guarda um
+// snapshot por servidor em `rubinot:<servidor>`. Fica fora de `tutores:<servidor>`
+// de propósito: é dado derivado, não pode disputar com o save do painel nem
+// entrar no payload que vai pra IA.
+
+const rubinotKey = serverId => `rubinot:${serverId}`
+
+// Só quem ainda está no time. Desligado não gasta request.
+const nicksParaColeta = serverId =>
+  (getKV(`tutores:${serverId}`) || [])
+    .filter(t => t?.nick && t.cargo !== 'Desligado')
+    .map(t => t.nick.trim())
+
+let coletaEmAndamento = false
+
+async function coletarServidor(serverId) {
+  const nicks = nicksParaColeta(serverId)
+  if (nicks.length === 0) return { servidor: serverId, total: 0, erros: 0 }
+
+  const anterior = getKV(rubinotKey(serverId))?.chars || {}
+  const { chars, erros } = await coletar(nicks, anterior)
+
+  const alertas = Object.values(chars).filter(c => c.status !== 'ok' || c.inativo)
+  setKV(rubinotKey(serverId), {
+    updatedAt: new Date().toISOString(),
+    inativoDias: INATIVO_DIAS,
+    chars,
+  })
+  console.log(`🔎 Rubinot [${serverId}]: ${nicks.length} tutores, ${alertas.length} com alerta, ${erros} erro(s)`)
+  return { servidor: serverId, total: nicks.length, alertas: alertas.length, erros }
+}
+
+async function coletarTodos(origem) {
+  if (coletaEmAndamento) return null
+  coletaEmAndamento = true
+  const inicio = Date.now()
+  const resultados = []
+  try {
+    for (const serverId of getValidServers()) {
+      try {
+        resultados.push(await coletarServidor(serverId))
+      } catch (e) {
+        console.error(`❌ Rubinot [${serverId}]:`, e?.message || e)
+        resultados.push({ servidor: serverId, falhou: true })
+      }
+    }
+    setKV('rubinot:lastRun', new Date().toISOString().slice(0, 10))
+    addAuditLog('sistema', 'rubinot_coleta', {
+      origem,
+      segundos: Math.round((Date.now() - inicio) / 1000),
+      servidores: resultados.length,
+    })
+  } finally {
+    coletaEmAndamento = false
+  }
+  return resultados
+}
+
+// Agendador em processo, não no crontab do host — o `bred` compartilha crontab
+// com o Bredot e mexer lá é proibido. TZ já está fixo em America/Sao_Paulo no
+// topo do arquivo, então "meia-noite local" é meia-noite de Brasília.
+function agendarColeta() {
+  const agora = new Date()
+  const alvo  = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate() + 1, 0, 0, 30)
+  setTimeout(() => {
+    coletarTodos('agendado').finally(agendarColeta)
+  }, alvo - agora).unref?.()
+}
+
+if (!IS_TEST) {
+  agendarColeta()
+  // Se o container reiniciou e a coleta de hoje não rodou, roda no boot.
+  setTimeout(() => {
+    if (getKV('rubinot:lastRun') !== new Date().toISOString().slice(0, 10))
+      coletarTodos('recuperacao')
+  }, 20000).unref?.()
+}
+
+app.get('/api/rubinot', requireAuth, requireServerAccess, (req, res) => {
+  res.json(getKV(serverKey(req, 'rubinot')) || { updatedAt: null, inativoDias: INATIVO_DIAS, chars: {} })
+})
+
+app.post('/api/rubinot/refresh', requireAuth, requireAdmin, requireServerAccess, rubinotLimiter, async (req, res) => {
+  if (coletaEmAndamento) return res.status(409).json({ error: 'Coleta já em andamento' })
+  const serverId = req.headers['x-server']
+  coletaEmAndamento = true
+  try {
+    const r = await coletarServidor(serverId)
+    addAuditLog(getDeviceApelido(req) || 'admin', 'rubinot_coleta', { origem: 'manual', server: serverId, ...r })
+    res.json({ ok: true, ...r, snapshot: getKV(rubinotKey(serverId)) })
+  } catch (e) {
+    res.status(502).json({ error: `Falha na coleta: ${e?.message || e}` })
+  } finally {
+    coletaEmAndamento = false
+  }
 })
 
 const PORT = Number(process.env.PORT) || 3003
