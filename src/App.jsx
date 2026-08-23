@@ -1732,6 +1732,8 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveR
   const pendente        = !isDesligado && repliesPendente(tutor, mesRef)
   const atividadeColor  = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
   const accentColor     = isDesligado ? '#6b7280' : pendente ? '#f59e0b' : emAusencia ? '#8b5cf6' : atividadeColor
+  const transf          = transferenciaInfo(tutor)
+  const bloqTransf      = transf && !transf.liberado
 
   return (
     <div
@@ -1851,6 +1853,24 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveR
             }}>
               <Palmtree size={10} /> Ausente até {formatDate(ausenciasAtivas[0].dataFim)}
             </span>
+          )}
+
+          {bloqTransf && (
+            <HoverTooltip side="top" width={250} content={
+              <span style={{ fontSize: 12, color: C.text, lineHeight: 1.5 }}>
+                Transferiu em {formatDate(transf.data)}. Nova transferência só a partir de{' '}
+                <strong style={{ color: '#7dd3fc' }}>{formatDate(transf.liberacao)}</strong>.
+              </span>
+            }>
+              <span style={{
+                background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.4)',
+                borderRadius: 6, color: '#7dd3fc',
+                fontSize: 11, fontWeight: 700, padding: '3px 9px',
+                display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'default',
+              }}>
+                <ArrowLeftRight size={10} /> Não pode transferir · {transf.restam}d
+              </span>
+            </HoverTooltip>
           )}
 
           {tutor.dataEfetivacao && !isDesligado && (
@@ -2054,6 +2074,8 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveRe
   const hasObs      = !!tutor.obs
   const isDesligado = tutor.cargo === 'Desligado'
   const pendente    = !isDesligado && repliesPendente(tutor, mesRef)
+  const transf      = transferenciaInfo(tutor)
+  const bloqTransf  = transf && !transf.liberado
   const atividadeColor = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
   const accentColor = isDesligado ? CARGO_COLORS['Desligado'] : pendente ? '#f59e0b' : emAusencia ? '#8b5cf6' : atividadeColor
 
@@ -2177,6 +2199,23 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveRe
               display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'default',
             }}>
               <AlertTriangle size={9} /> replies
+            </span>
+          </HoverTooltip>
+        )}
+
+        {bloqTransf && (
+          <HoverTooltip side="top" width={250} content={
+            <span style={{ fontSize: 12, color: C.text, lineHeight: 1.5 }}>
+              Transferiu em {formatDate(transf.data)}. Nova transferência só a partir de{' '}
+              <strong style={{ color: '#7dd3fc' }}>{formatDate(transf.liberacao)}</strong>.
+            </span>
+          }>
+            <span style={{
+              background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.4)',
+              borderRadius: 5, color: '#7dd3fc', fontSize: 10, fontWeight: 700, padding: '2px 7px',
+              display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'default',
+            }}>
+              <ArrowLeftRight size={9} /> transf. {transf.restam}d
             </span>
           </HoverTooltip>
         )}
