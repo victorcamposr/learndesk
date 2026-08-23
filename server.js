@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { parseCommand } from './commandParser.js'
-import { coletar, INATIVO_DIAS } from './rubinotWatch.js'
 import Database from 'better-sqlite3'
 import 'dotenv/config'
 
@@ -262,13 +261,6 @@ const geminiLimiter = IS_TEST ? noopMiddleware : rateLimit({
   windowMs: 60 * 1000,
   max: 10,
   message: { error: 'Muitas chamadas à IA. Tente novamente em 1 minuto.' },
-  standardHeaders: true, legacyHeaders: false,
-})
-
-const rubinotLimiter = IS_TEST ? noopMiddleware : rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 3,
-  message: { error: 'Coleta já solicitada há pouco. Aguarde alguns minutos.' },
   standardHeaders: true, legacyHeaders: false,
 })
 
@@ -632,8 +624,8 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
       return res.status(400).json({ error: 'Operação bloqueada: lista vazia não pode sobrescrever dados existentes' })
     }
   }
-  // Replies e snapshot do Rubinot são chaveados por nick; o tutor, por id. Sem
-  // migrar as chaves, trocar o nick de alguém órfã o histórico de replies dele —
+  // Replies são chaveadas por nick; o tutor, por id. Sem migrar a chave, trocar
+  // o nick de alguém órfã o histórico de replies dele —
   // a atividade zera e o número antigo fica preso num nick que não existe mais.
   // Detectar aqui (por id, comparando com o estado anterior) cobre todos os
   // caminhos de rename: modal de edição, comando da IA e importação.
@@ -645,7 +637,7 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
     if (antes && antes.toLowerCase() !== t.nick.trim().toLowerCase())
       renomeados.push([antes, t.nick.trim()])
   }
-  if (renomeados.length) migrarChavesPorNick(req, renomeados)
+  if (renomeados.length) migrarRepliesDoNick(req, renomeados)
 
   setKV(serverKey(req, 'tutores'), cleaned)
   res.json({ ok: true })
@@ -653,10 +645,9 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
 
 // Move o histórico de replies do nick antigo para o novo. Se o nick de destino
 // já tiver algum mês preenchido, ele vence — é o dado mais recente.
-function migrarChavesPorNick(req, renomeados) {
+function migrarRepliesDoNick(req, renomeados) {
   const replies = getKV(serverKey(req, 'replies')) || {}
-  const snap    = getKV(serverKey(req, 'rubinot'))
-  let mudouReplies = false, mudouSnap = false
+  let mudou = false
 
   for (const [de, para] of renomeados) {
     const kDe = de.toLowerCase(), kPara = para.trim().toLowerCase()
@@ -665,21 +656,16 @@ function migrarChavesPorNick(req, renomeados) {
     if (replies[kDe]) {
       replies[kPara] = { ...replies[kDe], ...(replies[kPara] || {}) }
       delete replies[kDe]
-      mudouReplies = true
+      mudou = true
       addAuditLog(getDeviceApelido(req) || 'sistema', 'replies_migradas', {
         server: req.headers['x-server'] || '?', de, para,
         meses: Object.keys(replies[kPara]).join(', '),
       })
       console.log(`↪️  Replies migradas: "${de}" → "${para}"`)
     }
-
-    // O snapshot velho descreve o nick antigo; deixá-lo acenderia um badge errado
-    // até a próxima coleta. Descartar é o certo — a coleta reconstrói.
-    if (snap?.chars?.[kDe]) { delete snap.chars[kDe]; mudouSnap = true }
   }
 
-  if (mudouReplies) setKV(serverKey(req, 'replies'), replies)
-  if (mudouSnap)    setKV(serverKey(req, 'rubinot'), snap)
+  if (mudou) setKV(serverKey(req, 'replies'), replies)
 }
 
 app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (req, res) => {
@@ -917,113 +903,6 @@ app.post('/api/auth/devices/:token/permissions', requireAuth, requireAdmin, (req
   const targetApelido = getDevices()[token]?.apelido || token.slice(0, 8)
   addAuditLog(getDeviceApelido(req) || 'admin', 'device_permissions', { target: targetApelido, role: finalRole, allowedServers: finalServers })
   res.json({ ok: true })
-})
-
-// ── Rubinot watch ──────────────────────────────────────────────────────────────
-//
-// Uma vez por dia consulta cada tutor na API pública do Rubinot e guarda um
-// snapshot por servidor em `rubinot:<servidor>`. Fica fora de `tutores:<servidor>`
-// de propósito: é dado derivado, não pode disputar com o save do painel nem
-// entrar no payload que vai pra IA.
-
-const rubinotKey = serverId => `rubinot:${serverId}`
-
-// Só quem ainda está no time. Desligado não gasta request.
-const nicksParaColeta = serverId =>
-  (getKV(`tutores:${serverId}`) || [])
-    .filter(t => t?.nick && t.cargo !== 'Desligado')
-    .map(t => t.nick.trim())
-
-let coletaEmAndamento = false
-
-async function coletarServidor(serverId) {
-  const nicks = nicksParaColeta(serverId)
-  if (nicks.length === 0) return { servidor: serverId, total: 0, erros: 0 }
-
-  const anterior = getKV(rubinotKey(serverId))?.chars || {}
-  const { chars, erros } = await coletar(nicks, anterior)
-
-  // Safeguard no mesmo espírito do de `tutores`: se TUDO falhou, o problema é a
-  // rede ou o Cloudflare, não os tutores. Sobrescrever encheria os cards de
-  // "falha na consulta" e apagaria o último retrato bom.
-  if (erros === nicks.length) {
-    console.warn(`[SAFEGUARD] Rubinot [${serverId}]: ${erros}/${nicks.length} falharam — snapshot anterior mantido`)
-    return { servidor: serverId, total: nicks.length, erros, descartado: true }
-  }
-
-  const alertas = Object.values(chars).filter(c => c.status !== 'ok' || c.inativo)
-  setKV(rubinotKey(serverId), {
-    updatedAt: new Date().toISOString(),
-    inativoDias: INATIVO_DIAS,
-    chars,
-  })
-  console.log(`🔎 Rubinot [${serverId}]: ${nicks.length} tutores, ${alertas.length} com alerta, ${erros} erro(s)`)
-  return { servidor: serverId, total: nicks.length, alertas: alertas.length, erros }
-}
-
-async function coletarTodos(origem) {
-  if (coletaEmAndamento) return null
-  coletaEmAndamento = true
-  const inicio = Date.now()
-  const resultados = []
-  try {
-    for (const serverId of getValidServers()) {
-      try {
-        resultados.push(await coletarServidor(serverId))
-      } catch (e) {
-        console.error(`❌ Rubinot [${serverId}]:`, e?.message || e)
-        resultados.push({ servidor: serverId, falhou: true })
-      }
-    }
-    setKV('rubinot:lastRun', new Date().toISOString().slice(0, 10))
-    addAuditLog('sistema', 'rubinot_coleta', {
-      origem,
-      segundos: Math.round((Date.now() - inicio) / 1000),
-      servidores: resultados.length,
-    })
-  } finally {
-    coletaEmAndamento = false
-  }
-  return resultados
-}
-
-// Agendador em processo, não no crontab do host — o `bred` compartilha crontab
-// com o Bredot e mexer lá é proibido. TZ já está fixo em America/Sao_Paulo no
-// topo do arquivo, então "meia-noite local" é meia-noite de Brasília.
-function agendarColeta() {
-  const agora = new Date()
-  const alvo  = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate() + 1, 0, 0, 30)
-  setTimeout(() => {
-    coletarTodos('agendado').finally(agendarColeta)
-  }, alvo - agora).unref?.()
-}
-
-if (!IS_TEST) {
-  agendarColeta()
-  // Se o container reiniciou e a coleta de hoje não rodou, roda no boot.
-  setTimeout(() => {
-    if (getKV('rubinot:lastRun') !== new Date().toISOString().slice(0, 10))
-      coletarTodos('recuperacao')
-  }, 20000).unref?.()
-}
-
-app.get('/api/rubinot', requireAuth, requireServerAccess, (req, res) => {
-  res.json(getKV(serverKey(req, 'rubinot')) || { updatedAt: null, inativoDias: INATIVO_DIAS, chars: {} })
-})
-
-app.post('/api/rubinot/refresh', requireAuth, requireAdmin, requireServerAccess, rubinotLimiter, async (req, res) => {
-  if (coletaEmAndamento) return res.status(409).json({ error: 'Coleta já em andamento' })
-  const serverId = req.headers['x-server']
-  coletaEmAndamento = true
-  try {
-    const r = await coletarServidor(serverId)
-    addAuditLog(getDeviceApelido(req) || 'admin', 'rubinot_coleta', { origem: 'manual', server: serverId, ...r })
-    res.json({ ok: true, ...r, snapshot: getKV(rubinotKey(serverId)) })
-  } catch (e) {
-    res.status(502).json({ error: `Falha na coleta: ${e?.message || e}` })
-  } finally {
-    coletaEmAndamento = false
-  }
 })
 
 const PORT = Number(process.env.PORT) || 3003

@@ -103,10 +103,6 @@ let _cfg = { ...DEFAULT_CFG }
 // função pura de tutor, sem precisar passar o mapa por toda a árvore.
 let _replies = {}
 
-// Snapshot diário do site do Rubinot: { nickLow: entry }. Mesmo padrão de _replies —
-// módulo-level para que rubinotInfo() continue sendo função pura de tutor.
-let _rubinot = {}
-
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 // Token de auth em sessionStorage (some ao fechar o browser, não é compartilhado entre abas).
 // Device token em localStorage (identifica o dispositivo, não é segredo de auth).
@@ -423,16 +419,6 @@ function transferenciaInfo(tutor) {
     nickAnterior: tutor.transferenciaNickAnterior || null,
     destino:      tutor.transferenciaDestino || null,
   }
-}
-
-// ── Rubinot (coleta diária) ───────────────────────────────────────────────────
-// Alertas vindos do snapshot noturno: troca de nome e tempo sem logar.
-// Retorna null quando o tutor ainda não foi coletado ou está sem novidade.
-function rubinotInfo(tutor) {
-  const r = _rubinot?.[tutor?.nick?.toLowerCase()]
-  if (!r) return null
-  const alerta = r.status !== 'ok' || r.inativo
-  return alerta ? r : null
 }
 
 // ── Replies mensais ───────────────────────────────────────────────────────────
@@ -1723,69 +1709,6 @@ function RepliesMensalModal({ open, onClose, tutores, onSaveReplies, mesInicial 
 }
 
 // ── TutorCard ─────────────────────────────────────────────────────────────────
-// Badge dos alertas da coleta noturna do Rubinot. `compacto` é a variante da lista.
-function RubinotBadge({ info, compacto = false }) {
-  if (!info) return null
-
-  const quando = info.checkedAt ? formatDate(info.checkedAt.slice(0, 10)) : '—'
-  const dias   = info.diasSemLogar
-
-  let cor, Icone, texto, curto, detalhe
-  if (info.status === 'nome_alterado') {
-    cor = '#fbbf24'; Icone = AlertTriangle
-    texto = `Trocou de nome → ${info.nomeAtual}`
-    curto = 'trocou de nome'
-    detalhe = <>O nick cadastrado agora aparece como <strong style={{ color: '#fbbf24' }}>nome anterior</strong> de{' '}
-      <strong style={{ color: '#fbbf24' }}>{info.nomeAtual}</strong>
-      {info.renomeConfirmado === false && ' (não confirmado no histórico de nomes do char)'}.</>
-  } else if (info.status === 'nick_reciclado') {
-    cor = '#f87171'; Icone = AlertTriangle
-    texto = 'Nick pertence a outro char'
-    curto = 'nick reciclado'
-    detalhe = <>O nome continua existindo, mas o personagem é outro — data de criação mudou.
-      Provavelmente o tutor renomeou e alguém pegou o nick liberado.</>
-  } else if (info.status === 'nao_encontrado') {
-    cor = '#f87171'; Icone = AlertTriangle
-    texto = 'Não encontrado no Rubinot'
-    curto = 'não encontrado'
-    detalhe = <>A busca por esse nick não devolveu nenhum personagem.</>
-  } else if (info.status === 'erro') {
-    cor = '#94a3b8'; Icone = AlertTriangle
-    texto = 'Falha na consulta'
-    curto = 'consulta falhou'
-    detalhe = <>Não foi possível consultar o Rubinot: {info.erro}. Os dados exibidos são da última coleta bem-sucedida.</>
-  } else {
-    cor = '#fb923c'; Icone = Moon
-    texto = `${dias} dias sem logar`
-    curto = `${dias}d off`
-    detalhe = <>Último login em <strong style={{ color: '#fb923c' }}>{info.lastlogin ? formatDate(new Date(info.lastlogin * 1000).toISOString().slice(0, 10)) : '—'}</strong>
-      {info.level ? <> · level {info.level}</> : null}.</>
-  }
-
-  // Inatividade junto de um alerta de nome: cabe na mesma tooltip, não vira segundo badge.
-  const tambemInativo = info.status !== 'ok' && info.status !== 'erro' && info.inativo
-
-  return (
-    <HoverTooltip side="top" width={270} content={
-      <span style={{ fontSize: 12, color: C.text, lineHeight: 1.5 }}>
-        {detalhe}
-        {tambemInativo && <> Além disso, está há <strong style={{ color: '#fb923c' }}>{dias} dias</strong> sem logar.</>}
-        <span style={{ display: 'block', marginTop: 6, color: C.textMuted, fontSize: 11 }}>Coletado em {quando}</span>
-      </span>
-    }>
-      <span style={{
-        background: `${cor}1f`, border: `1px solid ${cor}66`,
-        borderRadius: compacto ? 5 : 6, color: cor,
-        fontSize: compacto ? 10 : 11, fontWeight: 700,
-        padding: compacto ? '2px 7px' : '3px 9px',
-        display: 'inline-flex', alignItems: 'center', gap: compacto ? 4 : 5, cursor: 'default',
-      }}>
-        <Icone size={compacto ? 9 : 10} /> {compacto ? curto : texto}
-      </span>
-    </HoverTooltip>
-  )
-}
-
 function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveReplies, onOpenProfile }) {
   const [hover, setHover]               = useState(false)
   const [confirmDel, setConfirmDel]     = useState(false)
@@ -1811,7 +1734,6 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveR
   const accentColor     = isDesligado ? '#6b7280' : pendente ? '#f59e0b' : emAusencia ? '#8b5cf6' : atividadeColor
   const transf          = transferenciaInfo(tutor)
   const bloqTransf      = transf && !transf.liberado
-  const rubi            = isDesligado ? null : rubinotInfo(tutor)
 
   return (
     <div
@@ -1950,8 +1872,6 @@ function TutorCard({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveR
               </span>
             </HoverTooltip>
           )}
-
-          <RubinotBadge info={rubi} />
 
           {tutor.dataEfetivacao && !isDesligado && (
             <span style={{
@@ -2156,7 +2076,6 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveRe
   const pendente    = !isDesligado && repliesPendente(tutor, mesRef)
   const transf      = transferenciaInfo(tutor)
   const bloqTransf  = transf && !transf.liberado
-  const rubi        = tutor.cargo === 'Desligado' ? null : rubinotInfo(tutor)
   const atividadeColor = ATIVIDADE_COLORS[getAtividade(tutor)] || C.textMuted
   const accentColor = isDesligado ? CARGO_COLORS['Desligado'] : pendente ? '#f59e0b' : emAusencia ? '#8b5cf6' : atividadeColor
 
@@ -2300,8 +2219,6 @@ function TutorRow({ tutor, onEdit, onDelete, onOpenAusencia, onOpenObs, onSaveRe
             </span>
           </HoverTooltip>
         )}
-
-        <RubinotBadge info={rubi} compacto />
       </div>
 
       {/* Horário */}
@@ -4337,7 +4254,6 @@ const AUDIT_LABELS = {
   settings_save:          { label: 'Configurações salvas',   color: C.primaryBright },
   apikey_update:          { label: 'API Key atualizada',     color: '#8b5cf6' },
   env_list_update:        { label: 'Ambientes atualizados',  color: C.gold },
-  rubinot_coleta:         { label: 'Coleta no Rubinot',      color: C.teal },
   replies_migradas:       { label: 'Replies migradas',       color: '#8b5cf6' },
 }
 
@@ -6629,9 +6545,7 @@ function App({ onChangeServer, servers: serversProp, envConfigs, meInfo, onUpdat
       apiFetch('/api/tutores').then(r => r.json()),
       apiFetch('/api/settings').then(r => r.json()).catch(() => ({})),
       apiFetch('/api/replies').then(r => r.json()).catch(() => ({})),
-      apiFetch('/api/rubinot').then(r => r.json()).catch(() => null),
-    ]).then(([tutoresData, settingsData, repliesData, rubinotData]) => {
-      if (rubinotData && !rubinotData.error) _rubinot = rubinotData.chars || {}
+    ]).then(([tutoresData, settingsData, repliesData]) => {
       if (repliesData && !repliesData.error) {
         _replies = repliesData
         setReplies(repliesData)
