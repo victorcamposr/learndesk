@@ -1083,9 +1083,9 @@ function TrocaNickModal({ tutor, nickNovo, open, onClose, onConfirm }) {
               </div>
             )}
             <div>
-              <label style={labelStyle}>De onde veio (servidor / mundo)</label>
+              <label style={labelStyle}>De onde veio (servidor / mundo) — opcional</label>
               <input autoFocus style={{ ...inputBase, fontSize: 13 }} value={destino}
-                onChange={e => setDestino(e.target.value)} placeholder="Ex: Grimoria I, Bredot..." />
+                onChange={e => setDestino(e.target.value)} placeholder="Ex: Solarian, Drakria..." />
             </div>
             <div>
               <label style={labelStyle}>Observações adicionais (opcional)</label>
