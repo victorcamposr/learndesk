@@ -4338,12 +4338,14 @@ const AUDIT_LABELS = {
   apikey_update:          { label: 'API Key atualizada',     color: '#8b5cf6' },
   env_list_update:        { label: 'Ambientes atualizados',  color: C.gold },
   rubinot_coleta:         { label: 'Coleta no Rubinot',      color: C.teal },
+  replies_migradas:       { label: 'Replies migradas',       color: '#8b5cf6' },
 }
 
 function formatAuditDetails(action, details) {
   if (!details || Object.keys(details).length === 0) return null
   const parts = []
   if (details.nick) parts.push(details.nick)
+  if (details.de && details.para) parts.push(`${details.de} → ${details.para}`)
   if (details.apelido) parts.push(details.apelido)
   if (details.target) parts.push(`→ ${details.target}`)
   if (details.cargo) parts.push(details.cargo)

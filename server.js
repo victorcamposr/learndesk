@@ -632,9 +632,55 @@ app.post('/api/tutores', requireAuth, requireServerAccess, (req, res) => {
       return res.status(400).json({ error: 'Operação bloqueada: lista vazia não pode sobrescrever dados existentes' })
     }
   }
+  // Replies e snapshot do Rubinot são chaveados por nick; o tutor, por id. Sem
+  // migrar as chaves, trocar o nick de alguém órfã o histórico de replies dele —
+  // a atividade zera e o número antigo fica preso num nick que não existe mais.
+  // Detectar aqui (por id, comparando com o estado anterior) cobre todos os
+  // caminhos de rename: modal de edição, comando da IA e importação.
+  const anteriores = getKV(serverKey(req, 'tutores')) || []
+  const nickPorId  = new Map(anteriores.map(t => [String(t.id), String(t.nick || '')]))
+  const renomeados = []
+  for (const t of cleaned) {
+    const antes = nickPorId.get(String(t.id))
+    if (antes && antes.toLowerCase() !== t.nick.trim().toLowerCase())
+      renomeados.push([antes, t.nick.trim()])
+  }
+  if (renomeados.length) migrarChavesPorNick(req, renomeados)
+
   setKV(serverKey(req, 'tutores'), cleaned)
   res.json({ ok: true })
 })
+
+// Move o histórico de replies do nick antigo para o novo. Se o nick de destino
+// já tiver algum mês preenchido, ele vence — é o dado mais recente.
+function migrarChavesPorNick(req, renomeados) {
+  const replies = getKV(serverKey(req, 'replies')) || {}
+  const snap    = getKV(serverKey(req, 'rubinot'))
+  let mudouReplies = false, mudouSnap = false
+
+  for (const [de, para] of renomeados) {
+    const kDe = de.toLowerCase(), kPara = para.trim().toLowerCase()
+    if (kDe === kPara) continue
+
+    if (replies[kDe]) {
+      replies[kPara] = { ...replies[kDe], ...(replies[kPara] || {}) }
+      delete replies[kDe]
+      mudouReplies = true
+      addAuditLog(getDeviceApelido(req) || 'sistema', 'replies_migradas', {
+        server: req.headers['x-server'] || '?', de, para,
+        meses: Object.keys(replies[kPara]).join(', '),
+      })
+      console.log(`↪️  Replies migradas: "${de}" → "${para}"`)
+    }
+
+    // O snapshot velho descreve o nick antigo; deixá-lo acenderia um badge errado
+    // até a próxima coleta. Descartar é o certo — a coleta reconstrói.
+    if (snap?.chars?.[kDe]) { delete snap.chars[kDe]; mudouSnap = true }
+  }
+
+  if (mudouReplies) setKV(serverKey(req, 'replies'), replies)
+  if (mudouSnap)    setKV(serverKey(req, 'rubinot'), snap)
+}
 
 app.post('/api/chat', requireAuth, requireServerAccess, geminiLimiter, async (req, res) => {
   const { message, history, tutores } = req.body || {}
@@ -896,6 +942,14 @@ async function coletarServidor(serverId) {
 
   const anterior = getKV(rubinotKey(serverId))?.chars || {}
   const { chars, erros } = await coletar(nicks, anterior)
+
+  // Safeguard no mesmo espírito do de `tutores`: se TUDO falhou, o problema é a
+  // rede ou o Cloudflare, não os tutores. Sobrescrever encheria os cards de
+  // "falha na consulta" e apagaria o último retrato bom.
+  if (erros === nicks.length) {
+    console.warn(`[SAFEGUARD] Rubinot [${serverId}]: ${erros}/${nicks.length} falharam — snapshot anterior mantido`)
+    return { servidor: serverId, total: nicks.length, erros, descartado: true }
+  }
 
   const alertas = Object.values(chars).filter(c => c.status !== 'ok' || c.inativo)
   setKV(rubinotKey(serverId), {
