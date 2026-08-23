@@ -6,7 +6,6 @@ on:
     paths:
       - 'server.js'
       - 'commandParser.js'
-      - 'backup-db.sh'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/deploy-backend.yml'
@@ -17,15 +16,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy via SSH
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enviar arquivos do backend
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: 'server.js,commandParser.js,package.json,package-lock.json'
+          target: /opt/rubinot/app
+
+      - name: Rebuild e restart do container
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd /home/campin/Rubinot
-            git fetch origin
-            git reset --hard origin/main
-            pm2 restart rubinot || pm2 start server.js --name rubinot
-            pm2 save
+            set -e
+            # Caminho explicito: e exatamente o que /etc/sudoers.d/rubinot-deploy autoriza.
+            sudo docker compose -f /opt/rubinot/docker-compose.yml build api
+            sudo docker compose -f /opt/rubinot/docker-compose.yml up -d api
+            sleep 5
+            sudo docker compose -f /opt/rubinot/docker-compose.yml ps api
